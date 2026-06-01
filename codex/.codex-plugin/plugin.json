@@ -3,6 +3,5 @@
   "version": "0.1.0",
   "description": "MyPenny memory injection — your memory follows you into Codex.",
   "author": { "name": "HelperLabs" },
-  "homepage": "https://app.mypenny.ai",
-  "hooks": "./hooks/hooks.json"
+  "homepage": "https://app.mypenny.ai"
 }
