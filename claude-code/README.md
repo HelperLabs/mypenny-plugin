@@ -9,7 +9,8 @@ all behavior lives in `@mypenny/code-core`.
 ```
 
 ## First-launch
-On first SessionStart the plugin will print to stderr:
-*"MyPenny plugin not authenticated. Run: npx @mypenny/code-core auth login"*
+On first SessionStart the plugin prints an auth hint to stderr with the exact
+resolved path to the bundled login script, e.g.:
+*"[mypenny] plugin not authenticated. Run: node \"<plugin-dir>/scripts/auth_login.mjs\""*
 
 Run that command, sign in, approve in your browser, and re-open the session.

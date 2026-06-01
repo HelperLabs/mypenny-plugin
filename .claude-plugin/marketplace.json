@@ -8,6 +8,11 @@
       "name": "mypenny-code-claude-code",
       "source": "./claude-code",
       "description": "MyPenny memory for Claude Code"
+    },
+    {
+      "name": "mypenny-code-codex",
+      "source": "./codex",
+      "description": "MyPenny memory for Codex"
     }
   ]
 }

@@ -328,6 +328,8 @@ function formatInjection(guidance, memories) {
 }
 
 // plugins/mypenny-code-core/scripts/session_start.ts
+import { fileURLToPath } from "node:url";
+import * as path4 from "node:path";
 var DEBUG = process.env.MYPENNY_DEBUG === "1";
 var debug = (...args) => {
   if (DEBUG) console.error("[mypenny:session_start]", ...args);
@@ -338,8 +340,10 @@ async function main() {
   const hookInput = normalizeHookInput(raw);
   if (!hookInput) return;
   if (!readToken()) {
+    const authScript = path4.join(path4.dirname(fileURLToPath(import.meta.url)), "auth_login.mjs");
     process.stderr.write(
-      "[mypenny] plugin not authenticated. Run: npx @mypenny/code-core auth login\n"
+      `[mypenny] plugin not authenticated. Run: node "${authScript}"
+`
     );
     return;
   }
