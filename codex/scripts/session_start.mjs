@@ -102,6 +102,18 @@ function createState(sessionId, projectPath) {
   writeState(state);
   return state;
 }
+function hashContent(content) {
+  return crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
+}
+function joinBundle(g) {
+  if (!g.userFacts && !g.subconscious && !g.codingGuidance) return "";
+  return `${g.userFacts}\0${g.subconscious}\0${g.codingGuidance}`;
+}
+function withGuidanceHash(state, guidance) {
+  const joined = joinBundle(guidance);
+  if (!joined) return state;
+  return { ...state, guidanceHash: hashContent(joined) };
+}
 function cleanupStaleSessions() {
   try {
     let lastCleanup = 0;
@@ -262,7 +274,7 @@ async function callTool(name, args) {
   }
 }
 async function getCoreMemoryBlocks(projectKey) {
-  const raw = await callTool("get_core_memory", { projectKey });
+  const raw = await callTool("penny_get_profile", { projectKey });
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -358,6 +370,8 @@ async function main() {
   );
   const output = formatInjection(guidance, []);
   if (output) console.log(output);
+  const state = readState(hookInput.session_id);
+  if (state) writeState(withGuidanceHash(state, guidance));
 }
 main().catch((err) => {
   if (DEBUG) console.error("[mypenny:session_start] error:", err);

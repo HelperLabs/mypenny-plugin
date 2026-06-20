@@ -226,7 +226,7 @@ async function callTool(name, args) {
   }
 }
 async function searchMemories(query, limit = 5) {
-  const raw = await callTool("search_memories", { query, limit });
+  const raw = await callTool("penny_search_notes", { query, limit });
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -242,7 +242,7 @@ async function searchMemories(query, limit = 5) {
   }
 }
 async function getCoreMemoryBlocks(projectKey) {
-  const raw = await callTool("get_core_memory", { projectKey });
+  const raw = await callTool("penny_get_profile", { projectKey });
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
