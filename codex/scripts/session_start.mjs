@@ -145,7 +145,10 @@ function cleanupStaleSessions() {
 
 // plugins/mypenny-code-core/lib/auth-store.ts
 import * as fs2 from "node:fs";
+var DEFAULT_BASE_URL = "https://engine.mypenny.ai";
 function readToken() {
+  const envToken = process.env.MYPENNY_TOKEN?.trim();
+  if (envToken) return envToken;
   try {
     return fs2.readFileSync(tokenPath(), "utf-8").trim() || null;
   } catch {
@@ -157,8 +160,20 @@ function readConfig() {
     const raw = fs2.readFileSync(configPath(), "utf-8");
     return JSON.parse(raw);
   } catch {
+    return readEnvConfig();
+  }
+}
+function readEnvConfig() {
+  if (!process.env.MYPENNY_TOKEN && !process.env.MYPENNY_BASE_URL && !process.env.MYPENNY_MEMORY_URL && !process.env.MYPENNY_MCP_URL && !process.env.MYPENNY_INGEST_URL) {
     return null;
   }
+  const baseUrl = process.env.MYPENNY_BASE_URL?.trim() || DEFAULT_BASE_URL;
+  return {
+    memoryUrl: process.env.MYPENNY_MEMORY_URL?.trim() || process.env.MYPENNY_MCP_URL?.trim() || `${baseUrl}/mcp`,
+    ingestUrl: process.env.MYPENNY_INGEST_URL?.trim() || `${baseUrl}/api/ingestTranscript`,
+    userId: process.env.MYPENNY_USER_ID?.trim() || "env",
+    issuedAt: 0
+  };
 }
 
 // plugins/mypenny-code-core/lib/project-key.ts
@@ -241,8 +256,36 @@ function sanitizeKey(raw) {
   return raw.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unknown";
 }
 
+// plugins/mypenny-code-core/lib/workspace.ts
+var CONVEX_ID_RE = /^[A-Za-z0-9:_-]{8,128}$/;
+function isLikelyConvexId(value) {
+  return CONVEX_ID_RE.test(value);
+}
+function debugEnabled() {
+  const value = process.env.MYPENNY_DEBUG?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+function configuredWorkspaceId() {
+  const workspaceId = process.env.MYPENNY_WORKSPACE_ID?.trim();
+  if (!workspaceId) return void 0;
+  if (isLikelyConvexId(workspaceId)) return workspaceId;
+  if (debugEnabled()) {
+    console.error(
+      "[mypenny] ignoring malformed MYPENNY_WORKSPACE_ID; expected a Convex sharedWorkspaces id"
+    );
+  }
+  return void 0;
+}
+function debugLog(message) {
+  if (debugEnabled()) console.error(message);
+}
+
 // plugins/mypenny-code-core/lib/memory-client.ts
 var TIMEOUT_MS = 8e3;
+function withConfiguredWorkspace(args) {
+  const workspaceId = configuredWorkspaceId();
+  return workspaceId ? { ...args, workspaceId } : args;
+}
 async function callTool(name, args) {
   const token = readToken();
   const cfg = readConfig();
@@ -259,17 +302,26 @@ async function callTool(name, args) {
       body: JSON.stringify({
         jsonrpc: "2.0",
         method: "tools/call",
-        params: { name, arguments: args },
+        params: { name, arguments: withConfiguredWorkspace(args) },
         id: Date.now()
       }),
       signal: controller.signal
     });
     clearTimeout(timer);
-    if (!response.ok) return null;
+    if (!response.ok) {
+      debugLog(`[mypenny] MCP tool ${name} failed: HTTP ${response.status}`);
+      return null;
+    }
     const data = await response.json();
-    if (data.error) return null;
+    if (data.error) {
+      debugLog(`[mypenny] MCP tool ${name} failed: ${data.error.message}`);
+      return null;
+    }
     return data.result?.content?.find((c) => c.type === "text")?.text ?? null;
-  } catch {
+  } catch (err) {
+    debugLog(
+      `[mypenny] MCP tool ${name} failed: ${err instanceof Error ? err.message : String(err)}`
+    );
     return null;
   }
 }

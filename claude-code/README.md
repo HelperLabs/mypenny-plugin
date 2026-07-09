@@ -26,3 +26,15 @@ resolved path to the bundled login script, e.g.:
 *"[mypenny] plugin not authenticated. Run: node \"<plugin-dir>/scripts/auth_login.mjs\""*
 
 Run that command, sign in, approve in your browser, and re-open the session.
+
+## Shared Workspace Scope
+
+The per-project subconscious block does not need configuration; Claude Code
+passes the current working directory and MyPenny derives
+`subconscious:<projectKey>` from the repo. If you also want this plugin to
+read/write a MyPenny shared workspace, set `MYPENNY_WORKSPACE_ID` to the actual
+shared workspace id granted to your plugin token. Do not set it to a local path,
+repo name, or Claude project directory.
+
+Set `MYPENNY_DEBUG=1` to log ignored malformed workspace ids or failed shared
+workspace calls.

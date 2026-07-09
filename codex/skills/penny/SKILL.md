@@ -294,12 +294,12 @@ user's timezone so those dates are right.
 - **Read** with `penny_task_query`: filter by bucket (today/upcoming/anytime/
   someday), project, area, tags, status, or owner; pass `taskId` for one task's
   full detail. Use this for "what's on my plate?" or "what's due?".
-- **Organize** with `penny_org_write`: create or rename the areas, projects, and
-  headings that hold tasks.
-- **Read the structure** with `penny_org_query`: enumerate areas, projects, or
-  headings (discriminate by `type`) to navigate the full tree. The digest is
-  capped and omits headings, so reach for this when you need the complete
-  structure or a project's headings.
+- **Organize** with `penny_task_organize` (`mode: "write"`): create or rename
+  the areas, projects, and headings that hold tasks.
+- **Read the structure** with `penny_task_organize` (`mode: "query"`):
+  enumerate areas, projects, or headings (discriminate by `type`) to navigate
+  the full tree. The digest is capped and omits headings, so reach for this
+  when you need the complete structure or a project's headings.
 - A task is an actionable to-do; a note is durable knowledge. Capture an action
   item as a task, not a note — and don't double-store it as both.
 
@@ -334,7 +334,7 @@ parameters. Anchor tools are bolded.
 | Tags | `penny_get_tags`, `penny_related_tags`, `penny_assert_tag_hierarchy`, `penny_delete_tag_link` |
 | Trackers | `penny_tracker_create`, `penny_tracker_list`, `penny_tracker_log`, `penny_tracker_query`, `penny_tracker_summary`, `penny_tracker_link_note`, `penny_trash_tracker_entry`, `penny_restore_tracker_entry` |
 | Rhythms | `penny_rhythm_define`, `penny_rhythm_list`, `penny_rhythm_due`, `penny_rhythm_get`, `penny_rhythm_start_run`, `penny_rhythm_complete_run`, `penny_rhythm_runs`, `penny_rhythm_delete` |
-| Tasks & org | `penny_task_write`, `penny_task_query`, `penny_org_write`, `penny_org_query` |
+| Tasks & org | `penny_task_write`, `penny_task_query`, `penny_task_organize` (`mode: query\|write`) |
 | Onboarding | `penny_start_setup` (when `meta.onboarded` is false) |
 
 Names and jobs only — the body sections above and each tool's own description
