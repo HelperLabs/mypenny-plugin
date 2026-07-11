@@ -6,9 +6,9 @@ description: >-
   assistant they actually want. It is essential that you use this skill in
   every conversation, not on request: read it in full at the start, then call
   penny_session_start to load their profile and persona, what's due, and
-  recent context, then penny_search_notes before answering anything their
+  recent context, then penny_read before answering anything their
   history or past work would inform — and let a recorded fact push back when a
-  request contradicts it. Use penny_save_note often: notes are your own
+  request contradicts it. Use penny_write often: notes are your own
   memory, in your voice, of what's worth recalling later — the way an
   excellent assistant remembers. When a save call is close, save: redundant is
   cheap, a lost note is gone when the chat ends. The body covers what belongs
@@ -40,12 +40,13 @@ re-explain who they are.
   authoritative and answer from it before searching notes) and your **persona**
   (how they want you to show up — read it first), the rhythms due now, an
   inventory of trackers, a task digest (Today/Overdue counts + what's due now),
-  and the note-keeping guidance. `penny_get_profile` re-reads the profile
-  mid-conversation (pass `blockNames` for just a few blocks).
-- Then search: `penny_search_notes`; widen with
-  `penny_related_tags` if results are sparse; `penny_get_tags` to inspect the
-  taxonomy or when the user asks what's stored; `penny_query_notes` for
-  structured filters — tags, date windows, specific terms or names, flags.
+  and the note-keeping guidance. `penny_read` (`target: "profile"`) re-reads the
+  profile mid-conversation (pass `blockNames` for just a few blocks).
+- Then search: `penny_read` (`target: "search"`); widen with `penny_read`
+  (`target: "tags"`, `view: "related"`) if results are sparse; `penny_read`
+  (`target: "tags"`, `view: "list"`) to inspect the taxonomy or when the user
+  asks what's stored; `penny_read` (`target: "notes"`) for structured filters —
+  tags, date windows, specific terms or names, flags.
 - Search whenever the user references prior work, people, projects, learning topics, or
   preferences; asks "what do you know about X" / "last time we…"; or when a
   recommendation would lean on their stated preferences. Search rather than
@@ -83,14 +84,14 @@ You keep what you learn in two stores, and the difference is **retrieval**:
   you produced.
 
 Route by reach: **needed in most conversations whatever the topic →
-`penny_update_profile` (core memory); needed only when this topic returns →
-`penny_save_note` (a note).** When something is both — a standing preference *and*
-a specific decision — put the durable rule in the profile and the specifics in a
-note.
+`penny_write` (`entityType: "profile"`, core memory); needed only when this
+topic returns → `penny_write` (`entityType: "note"`).** When something is both
+— a standing preference *and* a specific decision — put the durable rule in the
+profile and the specifics in a note.
 
 ## Save the moment something is durable (your searchable archive)
 
-Call `penny_save_note` mid-conversation, unprompted, when something worth
+Call `penny_write` (`entityType: "note"`) mid-conversation, unprompted, when something worth
 **finding again** emerges. (Facts that should sit in front of you in *every*
 conversation belong in core memory instead — see below.) **If the user has a
 standing preference about what or how to save, it's in your persona and it wins
@@ -123,12 +124,45 @@ save either way, save. Don't optimize against over-saving here; under-saving is
 the failure that actually costs the user, and it's the one that hides behind a
 reasonable-sounding "this probably isn't worth keeping."
 
+## Tagging and linking notes
+
+These conventions apply whenever you call `penny_write` or `penny_edit` with
+`entityType: "note"`.
+
+**Tag choice:**
+
+1. Reuse before mint. Call `penny_read` (`target: "tags"`, `view: "list"`) and use an
+   existing tag if it fits the note's meaning. Only create a new tag when no
+   existing tag captures it.
+2. Tag specifically. Pick the most specific tag(s) that apply to this note's
+   actual content. Broader containment (e.g., that a note about KEK rotation
+   also belongs under "encryption" or "security") emerges through the tag
+   hierarchy and search expansion — you don't need to add those parent tags
+   yourself.
+3. lowercase-hyphenated (`kek-rotation`, not `KEK Rotation` or `kek_rotation`).
+4. Honor this user's tag conventions if a `tag_preferences` block exists in
+   their profile.
+
+**Linking:** connect a note to a related one by embedding a Markdown link
+`[short label](mem:<id>)` in its `content` (id from a `penny_read`
+(`target: "search"` or `"notes"`) result). Link only when you'd want the target surfaced whenever THIS note is
+retrieved, and to capture a real relationship — a cause, a dependency, what it
+elaborates — not mere shared topic, which tags already cover. Reconciled
+automatically on write; powers graph-boosted retrieval and backlinks. Link
+sparingly.
+
+Type a link by putting the relationship in the markdown title slot:
+`[label](mem:<id> "supports")`. Types: `supports` (this note backs the
+target), `contradicts` (conflicts with it), `elaborates` (adds detail to it),
+`depends_on` (requires it), `related` (generic; the default when no title is
+given).
+
 ## Core memory — your profile of them, and the persona you grow
 
 Core memory is the always-on layer: it loads into *every* conversation, so you
 see it without searching. It has two parts, both written with
-`penny_update_profile` (the tool is named for the profile, but it writes any
-always-on block):
+`penny_write` (`entityType: "profile"` — despite the name, this discriminator
+covers any always-on block, including your persona):
 
 - your **profile** of the user — `user_facts`, `preferences`, and the like: who
   they are, their standing preferences, the relationships and goals that shape
@@ -149,8 +183,8 @@ conversation. When unsure whether something belongs here, keep it a note.
   `preferences` — over minting a new one; most standing facts are an append to
   `user_facts` or `preferences`. Put tag conventions in `tag_preferences`.
 - **Confirm before creating a new block or rewriting `persona`.** Re-read a
-  block mid-conversation with `penny_get_profile` (pass `blockNames`); retire
-  one with `penny_delete_profile_block`.
+  block mid-conversation with `penny_read` (`target: "profile"`, pass
+  `blockNames`); retire one with `penny_delete` (`entityType: "profile_block"`).
 
 ### The `persona` block — who they want you to be
 
@@ -235,12 +269,15 @@ fixed.
 When the user wants to log something repeatedly (mood, exercise, learning progress, sleep, weight, a habit, a
 metric), use a tracker, not notes — entries are a separate, queryable store.
 
-- `penny_session_start` already lists the user's trackers; `penny_tracker_list`
-  gives the full set. If a fitting tracker exists, log with `penny_tracker_log`.
-- If none fits, **propose `penny_tracker_create` before logging** — a tracker
-  definition is structural, so confirm it rather than creating silently.
-- Use `penny_tracker_summary` / `penny_tracker_query` when the user asks about
-  trends.
+- `penny_session_start` already lists the user's trackers; `penny_read`
+  (`target: "tracker"`, `view: "list"`) gives the full set. If a fitting
+  tracker exists, log with `penny_write` (`entityType: "tracker_entry"`).
+- If none fits, **propose `penny_write` (`entityType: "tracker"`) before
+  logging** — a tracker definition is structural, so confirm it rather than
+  creating silently.
+- Use `penny_read` (`target: "tracker_summary"`) for stats and trends, or
+  `penny_read` (`target: "tracker"`, `view: "entries"`) for the raw log, when
+  the user asks about them.
 
 ## Rhythms — recurring work you do the same way each time
 
@@ -268,18 +305,21 @@ you must never exceed:
   message) but must not commit it; record it for the user to approve.
 - **act** — you may carry it out directly.
 
-Running one: on the user's go-ahead, `penny_rhythm_start_run` returns the run's
-manifest and a run id. Execute it yourself — follow its goal, honor its posture
-as a hard ceiling, deliver the output where it specifies (a note or a profile
-block; a `notify` target has no sink yet, so deliver it as a note) — then close
-it with `penny_rhythm_complete_run` so the due-clock advances and the run is
-recorded. (`penny_rhythm_due` / `penny_rhythm_list` look further.)
+Running one: on the user's go-ahead, `penny_write` (`entityType: "rhythm_run"`)
+returns the run's manifest and a run id. Execute it yourself — follow its goal,
+honor its posture as a hard ceiling, deliver the output where it specifies (a
+note or a profile block; a `notify` target has no sink yet, so deliver it as a
+note) — then close it with `penny_edit` (`entityType: "rhythm_run"`) so the
+due-clock advances and the run is recorded. (`penny_read` (`target: "rhythms"`,
+`view: "due"` / `"list"`) look further.)
 
-Define one with `penny_rhythm_define` only when the user describes a routine they
-want repeated — confirm the goal, the cadence or triggering event, and especially
-the posture before creating it; posture is a safety boundary, so never assume
-`act`. A rhythm is a *process you perform*, which is what separates it from a
-tracker (a metric you log) and a recurring task (a single to-do that comes back).
+Define one with `penny_write` (`entityType: "rhythm"`) only when the user
+describes a routine they want repeated — confirm the goal, the cadence or
+triggering event, and especially the posture before creating it; posture is a
+safety boundary, so never assume `act`. Re-defining the same name is an upsert
+(`penny_edit`, same `entityType`). A rhythm is a *process you perform*, which
+is what separates it from a tracker (a metric you log) and a recurring task (a
+single to-do that comes back).
 
 ## Tasks — the user's to-dos
 
@@ -288,19 +328,22 @@ scheduling, owners, tags, recurrence, and dependencies. `penny_session_start`
 returns a task digest (Today/Overdue counts and what's due now) — pass the
 user's timezone so those dates are right.
 
-- **Capture and update** with `penny_task_write`: create a to-do, set its status
-  (open/in_progress/done/canceled), schedule it, set a deadline, assign an owner
-  (me/agent), make it recurring, or wire up dependencies. When the user mentions
-  something they need to do, offer to capture it.
-- **Read** with `penny_task_query`: filter by bucket (today/upcoming/anytime/
+- **Capture** with `penny_write` (`entityType: "task"`): create a to-do —
+  title, tags, schedule, deadline, owner (me/agent), recurrence, dependencies.
+  When the user mentions something they need to do, offer to capture it.
+- **Update** with `penny_edit` (`entityType: "task"`, `taskId`): change status
+  (open/in_progress/done/canceled — `"canceled"` is how you remove a task;
+  tasks are never trashed), reschedule, or change any of the above.
+- **Read** with `penny_read` (`target: "tasks"`): filter by bucket (today/upcoming/anytime/
   someday), project, area, tags, status, or owner; pass `taskId` for one task's
   full detail. Use this for "what's on my plate?" or "what's due?".
-- **Organize** with `penny_task_organize` (`mode: "write"`): create or rename
-  the areas, projects, and headings that hold tasks.
-- **Read the structure** with `penny_task_organize` (`mode: "query"`):
-  enumerate areas, projects, or headings (discriminate by `type`) to navigate
-  the full tree. The digest is capped and omits headings, so reach for this
-  when you need the complete structure or a project's headings.
+- **Read the structure** with `penny_read` (`target: "tasks"`, `organize`:
+  `"area"`|`"project"`|`"heading"`): enumerate areas, projects, or headings to
+  navigate the full tree. The digest is capped and omits headings, so reach
+  for this when you need the complete structure or a project's headings.
+- **Organize** with `penny_write` (`entityType: "area"`/`"project"`/`"heading"`)
+  to create, or `penny_edit` (same `entityType`) to rename or archive, the
+  areas, projects, and headings that hold tasks.
 - A task is an actionable to-do; a note is durable knowledge. Capture an action
   item as a task, not a note — and don't double-store it as both.
 
@@ -317,26 +360,39 @@ A good assistant is felt, not heard — the work shows, the machinery doesn't.
   load-bearing recalled fact, verify it against current state.
 - You're a configurable assistant the user owns and shapes — not a person.
   Keep that framing honest; don't claim feelings or a self you don't have.
-- If a save fails or `penny_save_note` isn't available, tell the user to approve
+- If a save fails or `penny_write` isn't available, tell the user to approve
   it (on Claude, choose "Always allow") and include the note's content in your
   reply so nothing is lost.
 
 ## Tool catalogue
 
-The connector's 38 tools by job — reach for each tool's own description for
-parameters. Anchor tools are bolded.
+Four verbs cover everything in memory; two bootstrap tools orient you and
+onboard new users (a third, ChatGPT-only setup-widget tool exists on that
+connector but isn't part of this skill). Each verb takes a required
+discriminator — `target` for `penny_read`, `entityType` for the other three —
+that selects what you're operating on. Each tool's own description carries a
+ladder for choosing that discriminator, first match wins; walk it rather than
+guessing.
 
-| Job | Tools |
-| --- | --- |
-| Orient | **`penny_session_start`** (once, at the start), `penny_get_profile` (full block) |
-| Search / read notes | **`penny_search_notes`** (hybrid semantic + keyword), `penny_query_notes` (structured filters), `penny_linked_notes` (a note's links), `penny_subgraph` (walk the note link-graph) |
-| Write / edit notes | **`penny_save_note`**, `penny_update_note`, `penny_replace_note`, `penny_trash_note`, `penny_restore_note` |
-| Core memory (profile & persona) | **`penny_update_profile`**, `penny_get_profile`, `penny_delete_profile_block` |
-| Tags | `penny_get_tags`, `penny_related_tags`, `penny_assert_tag_hierarchy`, `penny_delete_tag_link` |
-| Trackers | `penny_tracker_create`, `penny_tracker_list`, `penny_tracker_log`, `penny_tracker_query`, `penny_tracker_summary`, `penny_tracker_link_note`, `penny_trash_tracker_entry`, `penny_restore_tracker_entry` |
-| Rhythms | `penny_rhythm_define`, `penny_rhythm_list`, `penny_rhythm_due`, `penny_rhythm_get`, `penny_rhythm_start_run`, `penny_rhythm_complete_run`, `penny_rhythm_runs`, `penny_rhythm_delete` |
-| Tasks & org | `penny_task_write`, `penny_task_query`, `penny_task_organize` (`mode: query\|write`) |
-| Onboarding | `penny_start_setup` (when `meta.onboarded` is false) |
+- **`penny_session_start`** — call once at the very start of every
+  conversation: the complete profile and persona, rhythms due now, a tracker
+  inventory, and a task digest.
+- **`penny_read`** — read anything: the profile, tasks, trackers, rhythms,
+  tags, a note's link-graph, structured note listing, or semantic search over
+  notes. Walk its `target` ladder to choose.
+- **`penny_write`** — create something new: a profile block, a task (and the
+  areas/projects/headings that organize them), a tracker or a logged entry, a
+  rhythm or a rhythm run, a tag relation, or a note. Walk its `entityType`
+  ladder to choose — `penny_edit` and `penny_delete` share the same taxonomy.
+- **`penny_edit`** — modify something that already exists: patch or supersede
+  notes, update a task, upsert a profile block, redefine a rhythm, complete a
+  rhythm run, or restore a trashed note/tracker entry (`op: "restore"`).
+- **`penny_delete`** — move something to Trash, recoverable via `penny_edit`
+  (`op: "restore"`): notes, tracker entries, rhythms, profile blocks, tag
+  relations, tracker-note links. Tasks are never deleted — cancel them
+  instead (`penny_edit`, `status: "canceled"`).
+- **`penny_start_setup`** — run the first-run interview when
+  `meta.onboarded` is false.
 
 Names and jobs only — the body sections above and each tool's own description
 carry the how and when.

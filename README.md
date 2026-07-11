@@ -1,4 +1,4 @@
-# MyPenny Code
+# MyPenny
 
 Your MyPenny memory, in your coding tools. Self-contained plugin shells for
 Claude Code and Codex. Generated from HelperLabs/MyPenny — do not edit by hand.
