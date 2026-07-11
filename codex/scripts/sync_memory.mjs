@@ -1,5 +1,5 @@
 
-// plugins/mypenny-code-core/lib/hook-input.ts
+// plugins/mypenny-core/lib/hook-input.ts
 import * as readline from "node:readline";
 function readHookInputFrom(stream) {
   return new Promise((resolve2) => {
@@ -43,11 +43,11 @@ function normalizeHookInput(input) {
   return out;
 }
 
-// plugins/mypenny-code-core/lib/state.ts
+// plugins/mypenny-core/lib/state.ts
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
 
-// plugins/mypenny-code-core/lib/paths.ts
+// plugins/mypenny-core/lib/paths.ts
 import * as os from "node:os";
 import * as path from "node:path";
 function mypennyDir() {
@@ -66,7 +66,7 @@ function sessionPath(sessionId) {
   return path.join(sessionsDir(), `${sessionId}.json`);
 }
 
-// plugins/mypenny-code-core/lib/state.ts
+// plugins/mypenny-core/lib/state.ts
 var STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1e3;
 var CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
 function ensureSessionsDir() {
@@ -95,7 +95,7 @@ function joinBundle(g) {
   return `${g.userFacts}\0${g.subconscious}\0${g.codingGuidance}`;
 }
 
-// plugins/mypenny-code-core/lib/auth-store.ts
+// plugins/mypenny-core/lib/auth-store.ts
 import * as fs2 from "node:fs";
 var DEFAULT_BASE_URL = "https://engine.mypenny.ai";
 function readToken() {
@@ -128,7 +128,7 @@ function readEnvConfig() {
   };
 }
 
-// plugins/mypenny-code-core/lib/project-key.ts
+// plugins/mypenny-core/lib/project-key.ts
 import * as fs3 from "node:fs";
 import * as path2 from "node:path";
 function deriveProjectKey(cwd) {
@@ -208,7 +208,7 @@ function sanitizeKey(raw) {
   return raw.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unknown";
 }
 
-// plugins/mypenny-code-core/lib/memory-client.ts
+// plugins/mypenny-core/lib/memory-client.ts
 var TIMEOUT_MS = 8e3;
 function debugEnabled() {
   const value = process.env.MYPENNY_DEBUG?.trim().toLowerCase();
@@ -307,7 +307,7 @@ async function getGuidanceForCwd(cwd) {
   };
 }
 
-// plugins/mypenny-code-core/lib/format.ts
+// plugins/mypenny-core/lib/format.ts
 function formatInjection(guidance, memories) {
   const hasUser = guidance.userFacts.trim().length > 0;
   const hasSub = guidance.subconscious.trim().length > 0;
@@ -348,7 +348,7 @@ function formatInjection(guidance, memories) {
   return out;
 }
 
-// plugins/mypenny-code-core/lib/scrub.ts
+// plugins/mypenny-core/lib/scrub.ts
 var PATTERNS = [
   { name: "anthropic_key", regex: /sk-ant-[A-Za-z0-9_-]{20,}/g },
   { name: "openai_key", regex: /sk-[A-Za-z0-9]{20,}/g },
@@ -394,7 +394,7 @@ function scrubCredentials(text) {
   return scrubbed;
 }
 
-// plugins/mypenny-code-core/scripts/sync_memory.ts
+// plugins/mypenny-core/scripts/sync_memory.ts
 var DEBUG = process.env.MYPENNY_DEBUG === "1";
 var debug = (...args) => {
   if (DEBUG) console.error("[mypenny:sync]", ...args);

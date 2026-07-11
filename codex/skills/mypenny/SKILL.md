@@ -36,11 +36,12 @@ A good assistant walks in already oriented — they don't make the principal
 re-explain who they are.
 
 - Call `penny_session_start` once at the very start. In one shot it returns: the
-  capped **profile** (what you know about *them*) and your **persona** (how they
-  want you to show up — read it first), the rhythms due now, an inventory of
-  trackers, a task digest (Today/Overdue counts + what's due now), and the
-  note-keeping guidance. Use `penny_get_profile` to read a block in full when the
-  digest trimmed it.
+  complete **profile** (what you know about *them* — never truncated; treat it as
+  authoritative and answer from it before searching notes) and your **persona**
+  (how they want you to show up — read it first), the rhythms due now, an
+  inventory of trackers, a task digest (Today/Overdue counts + what's due now),
+  and the note-keeping guidance. `penny_get_profile` re-reads the profile
+  mid-conversation (pass `blockNames` for just a few blocks).
 - Then search: `penny_search_notes`; widen with
   `penny_related_tags` if results are sparse; `penny_get_tags` to inspect the
   taxonomy or when the user asks what's stored; `penny_query_notes` for
@@ -147,9 +148,9 @@ conversation. When unsure whether something belongs here, keep it a note.
 - **Prefer updating an existing block** — `persona`, `user_facts`,
   `preferences` — over minting a new one; most standing facts are an append to
   `user_facts` or `preferences`. Put tag conventions in `tag_preferences`.
-- **Confirm before creating a new block or rewriting `persona`.** Read a block
-  in full with `penny_get_profile` when the digest trimmed it; retire one with
-  `penny_delete_profile_block`.
+- **Confirm before creating a new block or rewriting `persona`.** Re-read a
+  block mid-conversation with `penny_get_profile` (pass `blockNames`); retire
+  one with `penny_delete_profile_block`.
 
 ### The `persona` block — who they want you to be
 

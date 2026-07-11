@@ -1,8 +1,8 @@
 
-// plugins/mypenny-code-core/scripts/send_transcript.ts
+// plugins/mypenny-core/scripts/send_transcript.ts
 import * as fs4 from "node:fs";
 
-// plugins/mypenny-code-core/lib/hook-input.ts
+// plugins/mypenny-core/lib/hook-input.ts
 import * as readline from "node:readline";
 function readHookInputFrom(stream) {
   return new Promise((resolve2) => {
@@ -46,11 +46,11 @@ function normalizeHookInput(input) {
   return out;
 }
 
-// plugins/mypenny-code-core/lib/state.ts
+// plugins/mypenny-core/lib/state.ts
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
 
-// plugins/mypenny-code-core/lib/paths.ts
+// plugins/mypenny-core/lib/paths.ts
 import * as os from "node:os";
 import * as path from "node:path";
 function mypennyDir() {
@@ -69,7 +69,7 @@ function sessionPath(sessionId) {
   return path.join(sessionsDir(), `${sessionId}.json`);
 }
 
-// plugins/mypenny-code-core/lib/state.ts
+// plugins/mypenny-core/lib/state.ts
 var STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1e3;
 var CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
 function ensureSessionsDir() {
@@ -91,7 +91,7 @@ function writeState(state) {
   fs.renameSync(tmp, target);
 }
 
-// plugins/mypenny-code-core/lib/scrub.ts
+// plugins/mypenny-core/lib/scrub.ts
 var PATTERNS = [
   { name: "anthropic_key", regex: /sk-ant-[A-Za-z0-9_-]{20,}/g },
   { name: "openai_key", regex: /sk-[A-Za-z0-9]{20,}/g },
@@ -137,7 +137,7 @@ function scrubCredentials(text) {
   return scrubbed;
 }
 
-// plugins/mypenny-code-core/lib/auth-store.ts
+// plugins/mypenny-core/lib/auth-store.ts
 import * as fs2 from "node:fs";
 var DEFAULT_BASE_URL = "https://engine.mypenny.ai";
 function readToken() {
@@ -170,7 +170,7 @@ function readEnvConfig() {
   };
 }
 
-// plugins/mypenny-code-core/lib/transcript-client.ts
+// plugins/mypenny-core/lib/transcript-client.ts
 var TIMEOUT_MS = 3e4;
 function debugEnabled() {
   const value = process.env.MYPENNY_DEBUG?.trim().toLowerCase();
@@ -221,7 +221,7 @@ async function sendTranscript(sessionId, projectKey, messages) {
   }
 }
 
-// plugins/mypenny-code-core/lib/project-key.ts
+// plugins/mypenny-core/lib/project-key.ts
 import * as fs3 from "node:fs";
 import * as path2 from "node:path";
 function deriveProjectKey(cwd) {
@@ -301,7 +301,7 @@ function sanitizeKey(raw) {
   return raw.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unknown";
 }
 
-// plugins/mypenny-code-core/scripts/send_transcript.ts
+// plugins/mypenny-core/scripts/send_transcript.ts
 var DEBUG = process.env.MYPENNY_DEBUG === "1";
 var MAX_MESSAGE_LENGTH = 2e3;
 var debug = (...args) => {

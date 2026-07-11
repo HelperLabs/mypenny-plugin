@@ -1,13 +1,13 @@
 
-// plugins/mypenny-code-core/scripts/auth_login.ts
+// plugins/mypenny-core/scripts/auth_login.ts
 import * as os2 from "node:os";
 import { spawn } from "node:child_process";
 
-// plugins/mypenny-code-core/lib/auth-store.ts
+// plugins/mypenny-core/lib/auth-store.ts
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
 
-// plugins/mypenny-code-core/lib/paths.ts
+// plugins/mypenny-core/lib/paths.ts
 import * as os from "node:os";
 import * as path from "node:path";
 function mypennyDir() {
@@ -20,7 +20,7 @@ function configPath() {
   return path.join(mypennyDir(), "config.json");
 }
 
-// plugins/mypenny-code-core/lib/auth-store.ts
+// plugins/mypenny-core/lib/auth-store.ts
 function ensureDir() {
   fs.mkdirSync(mypennyDir(), { recursive: true });
 }
@@ -40,7 +40,7 @@ function writeConfig(cfg) {
   atomicWrite(configPath(), JSON.stringify(cfg, null, 2) + "\n", 420);
 }
 
-// plugins/mypenny-code-core/lib/device-flow.ts
+// plugins/mypenny-core/lib/device-flow.ts
 var defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function requestDeviceCode(baseUrl, clientName) {
   const response = await fetch(`${baseUrl}/api/auth/device`, {
@@ -97,7 +97,7 @@ async function pollForToken(baseUrl, deviceCode, intervalSec, expiresInSec, deps
   }
 }
 
-// plugins/mypenny-code-core/scripts/auth_login.ts
+// plugins/mypenny-core/scripts/auth_login.ts
 var BASE_URL = process.env.MYPENNY_BASE_URL ?? "https://engine.mypenny.ai";
 var CLIENT_NAME = process.env.MYPENNY_CLIENT_NAME ?? os2.hostname();
 function openBrowser(url) {

@@ -1,7 +1,7 @@
 {
-  "name": "mypenny-code-claude-code",
+  "name": "mypenny-claude",
   "displayName": "MyPenny",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "MyPenny memory injection — your memory follows you into Claude Code.",
   "author": {
     "name": "HelperLabs"

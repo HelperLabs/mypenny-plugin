@@ -5,14 +5,14 @@ Claude Code and Codex. Generated from HelperLabs/MyPenny — do not edit by hand
 
 ## Install (Claude Code)
 ```
-/plugin marketplace add HelperLabs/mypenny-code
-/plugin install mypenny-code-claude-code@mypenny
+/plugin marketplace add HelperLabs/mypenny-plugin
+/plugin install mypenny-claude@mypenny
 ```
 
 ## Install (Codex)
 ```
-codex plugin marketplace add HelperLabs/mypenny-code
-codex plugin install mypenny-code-codex
+codex plugin marketplace add HelperLabs/mypenny-plugin
+codex plugin install mypenny-codex
 ```
 
 Then authenticate: run the bundled `auth_login.mjs` once (see the per-tool README).

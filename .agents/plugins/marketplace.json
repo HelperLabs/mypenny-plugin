@@ -8,9 +8,9 @@
   },
   "plugins": [
     {
-      "name": "mypenny-claude",
-      "source": "./claude-code",
-      "description": "MyPenny memory for Claude Code"
+      "name": "mypenny-codex",
+      "source": "./codex",
+      "description": "MyPenny memory for Codex"
     }
   ]
 }

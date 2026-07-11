@@ -1,7 +1,7 @@
 {
-  "name": "mypenny-code-codex",
+  "name": "mypenny-codex",
   "displayName": "MyPenny",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "MyPenny memory injection — your memory follows you into Codex.",
   "author": {
     "name": "HelperLabs"

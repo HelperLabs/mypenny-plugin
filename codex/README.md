@@ -1,8 +1,8 @@
-# @mypenny/code-codex
+# @mypenny/codex
 
 Codex plugin shell for MyPenny memory. It installs the MyPenny MCP server
 definition, MyPenny skill, and lifecycle hooks; hook behavior lives in
-`@mypenny/code-core`.
+`@mypenny/core`.
 Codex exposes the installed plugin directory through `CODEX_PLUGIN_ROOT`.
 
 ## Relationship To The ChatGPT App
@@ -20,10 +20,10 @@ provide the same behavior guarantees.
 
 ## Install (once published)
 ```
-codex plugin marketplace add HelperLabs/mypenny-code
+codex plugin marketplace add HelperLabs/mypenny-plugin
 ```
 
-Then open the Codex plugin browser and install `mypenny-code-codex`:
+Then open the Codex plugin browser and install `mypenny-codex`:
 
 ```
 codex
@@ -36,11 +36,11 @@ Refresh the marketplace source, then restart Codex so the bundled skill, MCP
 configuration, and hooks are reloaded:
 
 ```
-codex plugin marketplace upgrade HelperLabs/mypenny-code
+codex plugin marketplace upgrade HelperLabs/mypenny-plugin
 ```
 
 If Codex still shows the old plugin version, open `/plugins`, uninstall
-`mypenny-code-codex`, install it again from the refreshed marketplace, and
+`mypenny-codex`, install it again from the refreshed marketplace, and
 start a new thread.
 
 ## SharedSpace Scope
