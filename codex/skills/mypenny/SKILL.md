@@ -396,3 +396,8 @@ guessing.
 
 Names and jobs only — the body sections above and each tool's own description
 carry the how and when.
+
+If a tool call ever fails with `Unknown tool`, the live catalog is newer than
+this skill: trust the server's current tool list and the guidance
+`penny_session_start` returns over this document, and suggest the user update
+the MyPenny plugin (or remove and re-add the MyPenny connector) to refresh it.
