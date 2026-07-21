@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 
 // plugins/mypenny-core/lib/auth-store.ts
 import * as fs from "node:fs";
-import * as crypto from "node:crypto";
+import * as crypto2 from "node:crypto";
 
 // plugins/mypenny-core/lib/paths.ts
 import * as os from "node:os";
@@ -26,7 +26,7 @@ function ensureDir() {
 }
 function atomicWrite(target, contents, mode) {
   ensureDir();
-  const tmp = `${target}.${crypto.randomUUID()}.tmp`;
+  const tmp = `${target}.${crypto2.randomUUID()}.tmp`;
   fs.writeFileSync(tmp, contents, { mode });
   fs.renameSync(tmp, target);
   if (process.platform !== "win32") {
@@ -41,59 +41,90 @@ function writeConfig(cfg) {
 }
 
 // plugins/mypenny-core/lib/device-flow.ts
+var DEVICE_CLIENT_ID = "mypenny-core";
+var DEVICE_RESOURCE = "urn:mypenny:plugin-api";
 var defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function requestDeviceCode(baseUrl, clientName) {
+function base64Url(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function secureRandomBytes() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return bytes;
+}
+async function sha256Base64Url(value) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value)
+  );
+  return base64Url(new Uint8Array(digest));
+}
+async function requestDeviceCode(baseUrl, clientName, deps = {}) {
+  const bytes = (deps.randomBytes ?? secureRandomBytes)();
+  if (bytes.length !== 32) throw new Error("device authorization setup failed");
+  const clientContext = base64Url(bytes);
   const response = await fetch(`${baseUrl}/api/auth/device`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ client_name: clientName })
+    body: JSON.stringify({
+      client_id: DEVICE_CLIENT_ID,
+      client_name: clientName,
+      resource: DEVICE_RESOURCE,
+      client_context_challenge: await sha256Base64Url(clientContext)
+    })
   });
   if (!response.ok) {
-    let detail = "";
+    let error = "";
     try {
       const body = await response.json();
-      detail = body?.error ? `: ${body.error}` : "";
+      error = typeof body?.error === "string" ? `: ${body.error}` : "";
     } catch {
     }
-    throw new Error(`device-code request failed (HTTP ${response.status})${detail}`);
+    throw new Error(`device-code request failed (HTTP ${response.status})${error}`);
   }
-  return await response.json();
+  return {
+    response: await response.json(),
+    clientContext
+  };
 }
-async function pollForToken(baseUrl, deviceCode, intervalSec, expiresInSec, deps = {}) {
+async function pollForToken(baseUrl, authorization, deps = {}) {
   const sleep = deps.sleep ?? defaultSleep;
-  const deadline = Date.now() + expiresInSec * 1e3;
-  let currentInterval = intervalSec;
+  const deadline = Date.now() + authorization.response.expires_in * 1e3;
+  let intervalSeconds = authorization.response.interval;
   while (true) {
     if (Date.now() > deadline) {
       throw new Error("expired_token (deadline passed before user approved)");
     }
-    await sleep(currentInterval * 1e3);
+    await sleep(intervalSeconds * 1e3);
     const response = await fetch(`${baseUrl}/api/auth/device/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device_code: deviceCode })
+      body: JSON.stringify({
+        device_code: authorization.response.device_code,
+        client_id: DEVICE_CLIENT_ID,
+        resource: DEVICE_RESOURCE,
+        client_context: authorization.clientContext
+      })
     });
     let body = {};
     try {
       body = await response.json();
     } catch {
     }
-    if (response.ok && body?.access_token) {
+    if (response.ok && body.access_token && body.userId) {
       return { access_token: body.access_token, userId: body.userId };
     }
-    const errCode = body?.error ?? "unknown_error";
-    if (errCode === "authorization_pending") continue;
-    if (errCode === "slow_down") {
-      currentInterval = Math.max(1, currentInterval * 2);
+    const error = body.error ?? "unknown_error";
+    if (error === "authorization_pending") continue;
+    if (error === "slow_down") {
+      intervalSeconds += 5;
       continue;
     }
-    if (errCode === "expired_token") {
-      throw new Error("expired_token (server-side)");
+    if (error === "expired_token") throw new Error("expired_token (server-side)");
+    if (error === "access_denied") {
+      throw new Error("access_denied (authorization rejected)");
     }
-    if (errCode === "access_denied") {
-      throw new Error("access_denied (user rejected the request)");
-    }
-    throw new Error(`device-flow poll failed: ${errCode}`);
+    throw new Error(`device-flow poll failed: ${error}`);
   }
 }
 
@@ -110,7 +141,8 @@ function openBrowser(url) {
 async function main() {
   process.stderr.write(`[mypenny] requesting device code from ${BASE_URL} ...
 `);
-  const dc = await requestDeviceCode(BASE_URL, CLIENT_NAME);
+  const authorization = await requestDeviceCode(BASE_URL, CLIENT_NAME);
+  const dc = authorization.response;
   process.stderr.write(`
   Visit: ${dc.verification_uri_complete}
 `);
@@ -118,7 +150,7 @@ async function main() {
 
 `);
   openBrowser(dc.verification_uri_complete);
-  const approved = await pollForToken(BASE_URL, dc.device_code, dc.interval, dc.expires_in);
+  const approved = await pollForToken(BASE_URL, authorization);
   writeToken(approved.access_token);
   writeConfig({
     memoryUrl: process.env.MYPENNY_MEMORY_URL ?? `${BASE_URL}/mcp`,
