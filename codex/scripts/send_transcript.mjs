@@ -1,6 +1,6 @@
 
 // plugins/mypenny-core/scripts/send_transcript.ts
-import * as fs4 from "node:fs";
+import * as fs5 from "node:fs";
 
 // plugins/mypenny-core/lib/hook-input.ts
 import * as readline from "node:readline";
@@ -67,6 +67,9 @@ function sessionsDir() {
 }
 function sessionPath(sessionId) {
   return path.join(sessionsDir(), `${sessionId}.json`);
+}
+function claimsDir() {
+  return path.join(mypennyDir(), "claims");
 }
 
 // plugins/mypenny-core/lib/state.ts
@@ -197,8 +200,53 @@ function readEnvConfig() {
   };
 }
 
+// plugins/mypenny-core/lib/claim.ts
+import * as fs3 from "node:fs";
+import * as path2 from "node:path";
+import * as crypto3 from "node:crypto";
+var KEEP_WINDOWS = 2;
+function claimStem(name) {
+  const safe = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "claim";
+  const digest = crypto3.createHash("sha256").update(name).digest("hex").slice(0, 8);
+  return `${safe}.${digest}`;
+}
+function prune(dir, stem, currentWindow) {
+  try {
+    for (const file of fs3.readdirSync(dir)) {
+      if (!file.startsWith(`${stem}.`)) continue;
+      const w = Number(file.slice(stem.length + 1));
+      if (!Number.isFinite(w) || w > currentWindow - KEEP_WINDOWS) continue;
+      try {
+        fs3.unlinkSync(path2.join(dir, file));
+      } catch {
+      }
+    }
+  } catch {
+  }
+}
+function claimWindow(name, windowMs, now = Date.now(), failOpen = true) {
+  const dir = claimsDir();
+  const stem = claimStem(name);
+  const window = Math.floor(now / windowMs);
+  const target = path2.join(dir, `${stem}.${window}`);
+  try {
+    fs3.mkdirSync(dir, { recursive: true });
+  } catch {
+    return failOpen;
+  }
+  try {
+    fs3.closeSync(fs3.openSync(target, "wx"));
+  } catch (err) {
+    if (err?.code === "EEXIST") return false;
+    return failOpen;
+  }
+  prune(dir, stem, window);
+  return true;
+}
+
 // plugins/mypenny-core/lib/token-rotation.ts
 var ROTATION_TIMEOUT_MS = 8e3;
+var PROACTIVE_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1e3;
 var RENEW_AFTER_FRACTION = 2 / 3;
 var rotationAttempted = false;
 function tokenIsEnvPinned() {
@@ -222,7 +270,7 @@ function rotationUrl(memoryUrl) {
     return null;
   }
 }
-async function rotateToken() {
+async function rotateToken(timeoutMs = ROTATION_TIMEOUT_MS) {
   if (rotationAttempted) return null;
   rotationAttempted = true;
   if (tokenIsEnvPinned()) return null;
@@ -233,7 +281,7 @@ async function rotateToken() {
   if (!url) return null;
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), ROTATION_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -260,15 +308,15 @@ async function rotateToken() {
     return null;
   }
 }
-async function withTokenRotation(attempt, token) {
+async function withTokenRotation(attempt, token, timeoutMs) {
   let active = token;
-  if (!tokenIsEnvPinned() && renewalIsDue(readConfig(), Date.now())) {
-    const renewed = await rotateToken();
+  if (!tokenIsEnvPinned() && renewalIsDue(readConfig(), Date.now()) && claimWindow("token-rotate", PROACTIVE_ROTATION_WINDOW_MS)) {
+    const renewed = await rotateToken(timeoutMs);
     if (renewed) active = renewed;
   }
   const first = await attempt(active);
   if (!first.unauthorized) return first.value;
-  const rotated = await rotateToken();
+  const rotated = await rotateToken(timeoutMs);
   if (!rotated) return first.value;
   const second = await attempt(rotated);
   return second.value;
@@ -332,55 +380,55 @@ async function ingestOnce(token, ingestUrl, sessionId, projectKey, messages) {
 }
 
 // plugins/mypenny-core/lib/project-key.ts
-import * as fs3 from "node:fs";
-import * as path2 from "node:path";
+import * as fs4 from "node:fs";
+import * as path3 from "node:path";
 function deriveProjectKey(cwd) {
   try {
     const gitRoot = findGitRoot(cwd);
     if (gitRoot) {
       const configPath2 = resolveGitConfigPath(gitRoot);
-      if (configPath2 && fs3.existsSync(configPath2)) {
-        const remote = parseOriginRemote(fs3.readFileSync(configPath2, "utf-8"));
+      if (configPath2 && fs4.existsSync(configPath2)) {
+        const remote = parseOriginRemote(fs4.readFileSync(configPath2, "utf-8"));
         if (remote) return sanitizeKey(remote);
       }
-      return sanitizeKey(path2.basename(gitRoot));
+      return sanitizeKey(path3.basename(gitRoot));
     }
   } catch {
   }
-  return sanitizeKey(path2.basename(cwd));
+  return sanitizeKey(path3.basename(cwd));
 }
 function findGitRoot(start) {
   let dir = start;
   for (let i = 0; i < 32; i++) {
-    const gitPath = path2.join(dir, ".git");
-    if (fs3.existsSync(gitPath)) return dir;
-    const parent = path2.dirname(dir);
+    const gitPath = path3.join(dir, ".git");
+    if (fs4.existsSync(gitPath)) return dir;
+    const parent = path3.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
   return null;
 }
 function resolveGitConfigPath(gitRoot) {
-  const gitPath = path2.join(gitRoot, ".git");
+  const gitPath = path3.join(gitRoot, ".git");
   try {
-    const stat = fs3.statSync(gitPath);
+    const stat = fs4.statSync(gitPath);
     if (stat.isDirectory()) {
-      return path2.join(gitPath, "config");
+      return path3.join(gitPath, "config");
     }
     if (stat.isFile()) {
-      const contents = fs3.readFileSync(gitPath, "utf-8");
+      const contents = fs4.readFileSync(gitPath, "utf-8");
       const match = contents.match(/^gitdir:\s*(.+)$/m);
       if (!match) return null;
-      const gitdir = path2.resolve(gitRoot, match[1].trim());
-      const commondirPath = path2.join(gitdir, "commondir");
-      if (fs3.existsSync(commondirPath)) {
-        const commondir = path2.resolve(
+      const gitdir = path3.resolve(gitRoot, match[1].trim());
+      const commondirPath = path3.join(gitdir, "commondir");
+      if (fs4.existsSync(commondirPath)) {
+        const commondir = path3.resolve(
           gitdir,
-          fs3.readFileSync(commondirPath, "utf-8").trim()
+          fs4.readFileSync(commondirPath, "utf-8").trim()
         );
-        return path2.join(commondir, "config");
+        return path3.join(commondir, "config");
       }
-      return path2.join(gitdir, "config");
+      return path3.join(gitdir, "config");
     }
   } catch {
     return null;
@@ -411,9 +459,21 @@ function sanitizeKey(raw) {
   return raw.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unknown";
 }
 
+// plugins/mypenny-core/lib/watchdog.ts
+function armWatchdog(budgetMs, exitCode = 0) {
+  if (!Number.isFinite(budgetMs) || budgetMs <= 0) return () => {
+  };
+  const timer = setTimeout(() => {
+    process.exit(exitCode);
+  }, budgetMs);
+  timer.unref?.();
+  return () => clearTimeout(timer);
+}
+
 // plugins/mypenny-core/scripts/send_transcript.ts
 var DEBUG = process.env.MYPENNY_DEBUG === "1";
 var MAX_MESSAGE_LENGTH = 2e3;
+var WATCHDOG_MS = 11e4;
 var debug = (...args) => {
   if (DEBUG) console.error("[mypenny:send]", ...args);
 };
@@ -436,17 +496,18 @@ function extractMessage(line) {
 async function main() {
   if (process.env.MYPENNY_SUBCONSCIOUS === "off") return;
   if (!readToken()) return;
+  const disarm = armWatchdog(WATCHDOG_MS, 1);
   const raw = await readHookInput();
   const hookInput = normalizeHookInput(raw);
   if (!hookInput) return;
   if (hookInput.stop_hook_active) return;
-  if (!hookInput.transcript_path || !fs4.existsSync(hookInput.transcript_path)) {
+  if (!hookInput.transcript_path || !fs5.existsSync(hookInput.transcript_path)) {
     debug("no transcript file");
     return;
   }
   const state = readState(hookInput.session_id);
   const lastSentLine = state?.lastSentLine || 0;
-  const fileContent = fs4.readFileSync(hookInput.transcript_path, "utf-8");
+  const fileContent = fs5.readFileSync(hookInput.transcript_path, "utf-8");
   const allLines = fileContent.split("\n").filter((l) => l.trim());
   const newLines = allLines.slice(lastSentLine);
   if (newLines.length === 0) {
@@ -478,6 +539,7 @@ async function main() {
   if (success) {
     debug("sent successfully");
     if (state) writeState({ ...state, lastSentLine: allLines.length });
+    disarm();
   } else {
     debug("send failed \u2014 will retry next Stop hook");
     process.exit(1);
