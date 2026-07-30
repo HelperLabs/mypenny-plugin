@@ -103,7 +103,12 @@ async function pollForToken(baseUrl, authorization, deps = {}) {
         device_code: authorization.response.device_code,
         client_id: DEVICE_CLIENT_ID,
         resource: DEVICE_RESOURCE,
-        client_context: authorization.clientContext
+        client_context: authorization.clientContext,
+        // #996: advertising rotation support is what makes the server issue
+        // the modern credential (expiring, resource- and scope-bound). A
+        // client that omits this — an older install — keeps receiving the
+        // legacy non-expiring token until the dated retirement gate.
+        client_capabilities: ["token_rotation"]
       })
     });
     let body = {};
@@ -112,7 +117,11 @@ async function pollForToken(baseUrl, authorization, deps = {}) {
     } catch {
     }
     if (response.ok && body.access_token && body.userId) {
-      return { access_token: body.access_token, userId: body.userId };
+      return {
+        access_token: body.access_token,
+        userId: body.userId,
+        ...typeof body.expires_in === "number" && Number.isFinite(body.expires_in) ? { expires_in: body.expires_in } : {}
+      };
     }
     const error = body.error ?? "unknown_error";
     if (error === "authorization_pending") continue;
@@ -152,11 +161,17 @@ async function main() {
   openBrowser(dc.verification_uri_complete);
   const approved = await pollForToken(BASE_URL, authorization);
   writeToken(approved.access_token);
+  const issuedAt = Date.now();
   writeConfig({
     memoryUrl: process.env.MYPENNY_MEMORY_URL ?? `${BASE_URL}/mcp`,
     ingestUrl: process.env.MYPENNY_INGEST_URL ?? `${BASE_URL}/api/ingestTranscript`,
     userId: approved.userId,
-    issuedAt: Date.now()
+    issuedAt,
+    // #996: the server returns expires_in only for the modern expiring
+    // credential. Recording the deadline is what lets the plugin renew
+    // part-way through the token's life instead of discovering the problem
+    // when a request finally fails.
+    ...approved.expires_in !== void 0 ? { tokenExpiresAt: issuedAt + approved.expires_in * 1e3 } : {}
   });
   process.stderr.write(`[mypenny] authenticated as ${approved.userId}
 `);

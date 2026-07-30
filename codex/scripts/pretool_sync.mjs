@@ -97,7 +97,20 @@ function joinBundle(g) {
 
 // plugins/mypenny-core/lib/auth-store.ts
 import * as fs2 from "node:fs";
+import * as crypto2 from "node:crypto";
 var DEFAULT_BASE_URL = "https://engine.mypenny.ai";
+function ensureDir() {
+  fs2.mkdirSync(mypennyDir(), { recursive: true });
+}
+function atomicWrite(target, contents, mode) {
+  ensureDir();
+  const tmp = `${target}.${crypto2.randomUUID()}.tmp`;
+  fs2.writeFileSync(tmp, contents, { mode });
+  fs2.renameSync(tmp, target);
+  if (process.platform !== "win32") {
+    fs2.chmodSync(target, mode);
+  }
+}
 function readToken() {
   const envToken = process.env.MYPENNY_TOKEN?.trim();
   if (envToken) return envToken;
@@ -107,6 +120,9 @@ function readToken() {
     return null;
   }
 }
+function writeToken(token) {
+  atomicWrite(tokenPath(), token.trim(), 384);
+}
 function readConfig() {
   try {
     const raw = fs2.readFileSync(configPath(), "utf-8");
@@ -114,6 +130,17 @@ function readConfig() {
   } catch {
     return readEnvConfig();
   }
+}
+function writeConfig(cfg) {
+  atomicWrite(configPath(), JSON.stringify(cfg, null, 2) + "\n", 420);
+}
+function writeTokenExpiry(expiresAt) {
+  const cfg = readConfig();
+  if (!cfg) return;
+  const next = { ...cfg };
+  if (expiresAt === void 0) delete next.tokenExpiresAt;
+  else next.tokenExpiresAt = expiresAt;
+  writeConfig(next);
 }
 function readEnvConfig() {
   if (!process.env.MYPENNY_TOKEN && !process.env.MYPENNY_BASE_URL && !process.env.MYPENNY_MEMORY_URL && !process.env.MYPENNY_MCP_URL && !process.env.MYPENNY_INGEST_URL) {
@@ -208,6 +235,83 @@ function sanitizeKey(raw) {
   return raw.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unknown";
 }
 
+// plugins/mypenny-core/lib/token-rotation.ts
+var ROTATION_TIMEOUT_MS = 8e3;
+var RENEW_AFTER_FRACTION = 2 / 3;
+var rotationAttempted = false;
+function tokenIsEnvPinned() {
+  return Boolean(process.env.MYPENNY_TOKEN?.trim());
+}
+function renewalIsDue(cfg, now) {
+  if (!cfg) return false;
+  if (cfg.tokenExpiresAt === void 0) return true;
+  const issuedAt = cfg.issuedAt && cfg.issuedAt > 0 ? cfg.issuedAt : void 0;
+  if (issuedAt === void 0) {
+    return now >= cfg.tokenExpiresAt - (cfg.tokenExpiresAt - now) / 2;
+  }
+  const lifetime = cfg.tokenExpiresAt - issuedAt;
+  if (lifetime <= 0) return true;
+  return now - issuedAt >= lifetime * RENEW_AFTER_FRACTION;
+}
+function rotationUrl(memoryUrl) {
+  try {
+    return new URL("/api/auth/token/rotate", memoryUrl).toString();
+  } catch {
+    return null;
+  }
+}
+async function rotateToken() {
+  if (rotationAttempted) return null;
+  rotationAttempted = true;
+  if (tokenIsEnvPinned()) return null;
+  const token = readToken();
+  const cfg = readConfig();
+  if (!token || !cfg) return null;
+  const url = rotationUrl(cfg.memoryUrl);
+  if (!url) return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ROTATION_TIMEOUT_MS);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        // The boundary requires a declared JSON media type on POST; the
+        // credential itself rides in the Authorization header.
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: "{}",
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (!response.ok) return null;
+    const data = await response.json();
+    const next = typeof data.access_token === "string" ? data.access_token.trim() : "";
+    if (!next.startsWith("mpt_")) return null;
+    writeToken(next);
+    const expiresIn = typeof data.expires_in === "number" && Number.isFinite(data.expires_in) ? data.expires_in : void 0;
+    writeTokenExpiry(
+      expiresIn === void 0 ? void 0 : Date.now() + expiresIn * 1e3
+    );
+    return next;
+  } catch {
+    return null;
+  }
+}
+async function withTokenRotation(attempt, token) {
+  let active = token;
+  if (!tokenIsEnvPinned() && renewalIsDue(readConfig(), Date.now())) {
+    const renewed = await rotateToken();
+    if (renewed) active = renewed;
+  }
+  const first = await attempt(active);
+  if (!first.unauthorized) return first.value;
+  const rotated = await rotateToken();
+  if (!rotated) return first.value;
+  const second = await attempt(rotated);
+  return second.value;
+}
+
 // plugins/mypenny-core/lib/memory-client.ts
 var TIMEOUT_MS = 8e3;
 function debugEnabled() {
@@ -221,10 +325,16 @@ async function callTool(name, args) {
   const token = readToken();
   const cfg = readConfig();
   if (!token || !cfg) return null;
+  return withTokenRotation(
+    (bearer) => callToolOnce(name, args, bearer, cfg.memoryUrl),
+    token
+  );
+}
+async function callToolOnce(name, args, token, memoryUrl) {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    const response = await fetch(cfg.memoryUrl, {
+    const response = await fetch(memoryUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -241,19 +351,22 @@ async function callTool(name, args) {
     clearTimeout(timer);
     if (!response.ok) {
       debugLog(`[mypenny] MCP tool ${name} failed: HTTP ${response.status}`);
-      return null;
+      return { unauthorized: response.status === 401, value: null };
     }
     const data = await response.json();
     if (data.error) {
       debugLog(`[mypenny] MCP tool ${name} failed: ${data.error.message}`);
-      return null;
+      return { unauthorized: false, value: null };
     }
-    return data.result?.content?.find((c) => c.type === "text")?.text ?? null;
+    return {
+      unauthorized: false,
+      value: data.result?.content?.find((c) => c.type === "text")?.text ?? null
+    };
   } catch (err) {
     debugLog(
       `[mypenny] MCP tool ${name} failed: ${err instanceof Error ? err.message : String(err)}`
     );
-    return null;
+    return { unauthorized: false, value: null };
   }
 }
 async function getCoreMemoryBlocks(projectKey) {
