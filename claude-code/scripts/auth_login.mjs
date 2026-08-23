@@ -4,7 +4,7 @@ import * as os2 from "node:os";
 import { spawn } from "node:child_process";
 
 // plugins/mypenny-core/lib/auth-store.ts
-import * as fs from "node:fs";
+import * as fs2 from "node:fs";
 import * as crypto2 from "node:crypto";
 
 // plugins/mypenny-core/lib/paths.ts
@@ -19,22 +19,49 @@ function tokenPath() {
 function configPath() {
   return path.join(mypennyDir(), "config.json");
 }
+function authHealthPath() {
+  return path.join(mypennyDir(), "auth-health.json");
+}
+
+// plugins/mypenny-core/lib/auth-health.ts
+import * as fs from "node:fs";
+var RETRY_PENDING_HORIZON_MS = 12 * 60 * 1e3;
+var REJECTED_BACKOFF_MS = 6 * 60 * 60 * 1e3;
+var REPAIR_EVIDENCE_HORIZON_MS = 24 * 60 * 60 * 1e3;
+function debugLog(message) {
+  if (process.env.MYPENNY_DEBUG === "1") console.error(message);
+}
+function clearAuthHealth() {
+  try {
+    fs.unlinkSync(authHealthPath());
+  } catch (err) {
+    if (err?.code === "ENOENT") return;
+    try {
+      fs.writeFileSync(authHealthPath(), "{}\n", { mode: 384 });
+    } catch (writeErr) {
+      debugLog(
+        `[mypenny] auth-health clear failed: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`
+      );
+    }
+  }
+}
 
 // plugins/mypenny-core/lib/auth-store.ts
 function ensureDir() {
-  fs.mkdirSync(mypennyDir(), { recursive: true });
+  fs2.mkdirSync(mypennyDir(), { recursive: true });
 }
 function atomicWrite(target, contents, mode) {
   ensureDir();
   const tmp = `${target}.${crypto2.randomUUID()}.tmp`;
-  fs.writeFileSync(tmp, contents, { mode });
-  fs.renameSync(tmp, target);
+  fs2.writeFileSync(tmp, contents, { mode });
+  fs2.renameSync(tmp, target);
   if (process.platform !== "win32") {
-    fs.chmodSync(target, mode);
+    fs2.chmodSync(target, mode);
   }
 }
 function writeToken(token) {
   atomicWrite(tokenPath(), token.trim(), 384);
+  clearAuthHealth();
 }
 function writeConfig(cfg) {
   atomicWrite(configPath(), JSON.stringify(cfg, null, 2) + "\n", 420);

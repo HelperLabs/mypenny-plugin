@@ -100,6 +100,13 @@ function joinBundle(g) {
 
 // plugins/mypenny-core/lib/auth-store.ts
 import * as fs2 from "node:fs";
+
+// plugins/mypenny-core/lib/auth-health.ts
+var RETRY_PENDING_HORIZON_MS = 12 * 60 * 1e3;
+var REJECTED_BACKOFF_MS = 6 * 60 * 60 * 1e3;
+var REPAIR_EVIDENCE_HORIZON_MS = 24 * 60 * 60 * 1e3;
+
+// plugins/mypenny-core/lib/auth-store.ts
 function readToken() {
   const envToken = process.env.MYPENNY_TOKEN?.trim();
   if (envToken) return envToken;
@@ -236,6 +243,7 @@ function claimWindow(name, windowMs, now = Date.now(), failOpen = true) {
 
 // plugins/mypenny-core/lib/token-rotation.ts
 var PROACTIVE_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1e3;
+var ROTATION_RETRY_WINDOW_MS = 2 * 60 * 1e3;
 var RENEW_AFTER_FRACTION = 2 / 3;
 
 // plugins/mypenny-core/lib/guidance-cache.ts
