@@ -854,6 +854,30 @@ async function checkPluginFreshness(opts = {}) {
   return `MyPenny plugin update available: installed ${installed.version}, latest ${latest}. Updating refreshes the memory skill and MCP tool catalog. Let the user know they can update the MyPenny plugin via their plugin marketplace (or reinstall ${installed.npmName}).`;
 }
 
+// plugins/mypenny-core/lib/host.ts
+function parseHost(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--host") return argv[i + 1] ?? null;
+    if (a.startsWith("--host=")) return a.slice("--host=".length) || null;
+  }
+  return null;
+}
+function codexToolLoadingNotice(host) {
+  if (host !== "codex") return null;
+  return [
+    "<mypenny_tooling>",
+    "Your MyPenny memory tools (penny_session_start, penny_read, penny_write,",
+    "penny_edit, penny_delete) are MCP tools that Codex loads on demand. If they",
+    "are not in your available tools right now, they are deferred \u2014 NOT",
+    'unavailable. Use the `tool_search` tool (query "mypenny" or "memory") to',
+    "load them, then call penny_session_start. Never tell the user their memory",
+    "is unavailable, or that a save failed, without first loading the tools via",
+    "tool_search.",
+    "</mypenny_tooling>"
+  ].join("\n");
+}
+
 // plugins/mypenny-core/scripts/session_start.ts
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import * as path7 from "node:path";
@@ -902,6 +926,8 @@ ${repairNotice} Tell the user to re-pair by running: node "${authScript}"
   if (output) console.log(output);
   const state = readState(hookInput.session_id);
   if (state) writeState(withGuidanceHash(state, guidance));
+  const toolNotice = codexToolLoadingNotice(parseHost(process.argv.slice(2)));
+  if (toolNotice) console.log(toolNotice);
   try {
     const updateNotice = await checkPluginFreshness();
     if (updateNotice) {

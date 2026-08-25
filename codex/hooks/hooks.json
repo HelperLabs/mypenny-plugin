@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CODEX_PLUGIN_ROOT}/scripts/session_start.mjs\"",
+            "command": "node \"${CODEX_PLUGIN_ROOT}/scripts/session_start.mjs\" --host codex",
             "timeout": 5
           }
         ]
