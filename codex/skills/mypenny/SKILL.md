@@ -379,8 +379,8 @@ A good assistant is felt, not heard — the work shows, the machinery doesn't.
 ## Tool catalogue
 
 Four verbs cover everything in memory; two bootstrap tools orient you and
-onboard new users (a third, ChatGPT-only setup-widget tool exists on that
-connector but isn't part of this skill). Each verb takes a required
+onboard new users (a third, ChatGPT-only setup-widget tool is served on the
+ChatGPT connector and is not in this catalog). Each verb takes a required
 discriminator — `target` for `penny_read`, `entityType` for the other three —
 that selects what you're operating on. Each tool's own description carries a
 ladder for choosing that discriminator, first match wins; walk it rather than
@@ -411,7 +411,7 @@ carry the how and when.
 
 ### Staleness — when this skill is behind the server
 
-This skill targets MyPenny MCP catalog 0.2.0. Two signals mean the live server
+This skill targets MyPenny MCP catalog 0.3.0. Two signals mean the live server
 has moved ahead of it:
 
 - **At session start**, `penny_session_start` returns the live
