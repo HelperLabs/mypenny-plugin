@@ -43,10 +43,6 @@ function normalizeHookInput(input) {
   return out;
 }
 
-// plugins/mypenny-core/lib/state.ts
-import * as fs from "node:fs";
-import * as crypto from "node:crypto";
-
 // plugins/mypenny-core/lib/paths.ts
 import * as os from "node:os";
 import * as path from "node:path";
@@ -69,7 +65,16 @@ function claimsDir() {
   return path.join(mypennyDir(), "claims");
 }
 
+// plugins/mypenny-core/lib/diag.ts
+var MAX_BYTES = 256 * 1024;
+var diagContext = {};
+function setDiagContext(context) {
+  diagContext = { ...diagContext, ...context };
+}
+
 // plugins/mypenny-core/lib/state.ts
+import * as fs from "node:fs";
+import * as crypto from "node:crypto";
 var STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1e3;
 var CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
 function ensureSessionsDir() {
@@ -94,8 +99,17 @@ function hashContent(content) {
   return crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
 }
 function joinBundle(g) {
-  if (!g.userFacts && !g.subconscious && !g.codingGuidance) return "";
-  return `${g.userFacts}\0${g.subconscious}\0${g.codingGuidance}`;
+  const fields = [
+    g.userFacts,
+    g.subconscious,
+    g.codingGuidance,
+    g.memoryPolicy,
+    g.persona,
+    g.preferences,
+    g.contract
+  ];
+  if (fields.every((f) => !f)) return "";
+  return fields.join("\0");
 }
 
 // plugins/mypenny-core/lib/auth-store.ts
@@ -263,12 +277,18 @@ function readGuidanceCache(projectKey) {
       return null;
     }
     const b = parsed.bundle;
+    const preUpgrade = typeof b.memoryPolicy !== "string" || typeof b.persona !== "string" || typeof b.preferences !== "string" || typeof b.contract !== "string";
+    const str = (v) => typeof v === "string" ? v : "";
     return {
-      fetchedAt: parsed.fetchedAt,
+      fetchedAt: preUpgrade ? Number.NEGATIVE_INFINITY : parsed.fetchedAt,
       bundle: {
-        userFacts: typeof b.userFacts === "string" ? b.userFacts : "",
-        subconscious: typeof b.subconscious === "string" ? b.subconscious : "",
-        codingGuidance: typeof b.codingGuidance === "string" ? b.codingGuidance : "",
+        userFacts: str(b.userFacts),
+        subconscious: str(b.subconscious),
+        codingGuidance: str(b.codingGuidance),
+        memoryPolicy: str(b.memoryPolicy),
+        persona: str(b.persona),
+        preferences: str(b.preferences),
+        contract: str(b.contract),
         projectKey: typeof b.projectKey === "string" ? b.projectKey : projectKey
       }
     };
@@ -328,44 +348,67 @@ function spawnGuidanceRefresh(projectKey, cwd) {
   }
 }
 
+// plugins/mypenny-core/lib/format.ts
+function emptyGuidance(projectKey) {
+  return {
+    userFacts: "",
+    subconscious: "",
+    codingGuidance: "",
+    memoryPolicy: "",
+    persona: "",
+    preferences: "",
+    contract: "",
+    projectKey
+  };
+}
+function blocks(guidance) {
+  const out = [];
+  const push = (tag, raw) => {
+    const text = raw.trim();
+    if (text.length > 0) out.push({ tag, text });
+  };
+  push("operating_contract", guidance.contract);
+  push("persona", guidance.persona);
+  push("user_facts", guidance.userFacts);
+  push("preferences", guidance.preferences);
+  if (guidance.subconscious.trim().length > 0) {
+    out.push({
+      tag: `project_subconscious key="${guidance.projectKey}"`,
+      text: guidance.subconscious.trim()
+    });
+  }
+  push("coding_guidance", guidance.codingGuidance);
+  push("memory_policy", guidance.memoryPolicy);
+  return out;
+}
+function renderBlocks(guidance) {
+  let out = "";
+  for (const { tag, text } of blocks(guidance)) {
+    const close = tag.split(" ")[0];
+    out += `  <${tag}>
+    ${text}
+  </${close}>
+`;
+  }
+  return out;
+}
+function formatGuidanceUpdate(guidance) {
+  const inner = renderBlocks(guidance);
+  if (inner.length === 0) return "";
+  return `<mypenny_subconscious_update>
+${inner}</mypenny_subconscious_update>`;
+}
+
 // plugins/mypenny-core/lib/memory-client.ts
 function getCachedGuidanceForCwd(cwd) {
   const projectKey = deriveProjectKey(cwd);
   const cached = readGuidanceCache(projectKey);
   const refreshStarted = isGuidanceStale(cached) ? spawnGuidanceRefresh(projectKey, cwd) : false;
   return {
-    guidance: cached?.bundle ?? {
-      userFacts: "",
-      subconscious: "",
-      codingGuidance: "",
-      projectKey
-    },
+    guidance: cached?.bundle ?? emptyGuidance(projectKey),
     cacheHit: cached !== null,
     refreshStarted
   };
-}
-
-// plugins/mypenny-core/lib/format.ts
-function formatGuidanceUpdate(guidance) {
-  const hasUser = guidance.userFacts.trim().length > 0;
-  const hasSub = guidance.subconscious.trim().length > 0;
-  const hasCoding = guidance.codingGuidance.trim().length > 0;
-  if (!hasUser && !hasSub && !hasCoding) return "";
-  let inner = "";
-  if (hasUser) inner += `  <user_facts>
-    ${guidance.userFacts.trim()}
-  </user_facts>
-`;
-  if (hasSub) inner += `  <project_subconscious key="${guidance.projectKey}">
-    ${guidance.subconscious.trim()}
-  </project_subconscious>
-`;
-  if (hasCoding) inner += `  <coding_guidance>
-    ${guidance.codingGuidance.trim()}
-  </coding_guidance>
-`;
-  return `<mypenny_subconscious_update>
-${inner}</mypenny_subconscious_update>`;
 }
 
 // plugins/mypenny-core/lib/watchdog.ts
@@ -393,6 +436,7 @@ async function main() {
   const raw = await readHookInput();
   const hookInput = normalizeHookInput(raw);
   if (!hookInput) return;
+  setDiagContext({ hook: "pre_tool_use", sessionId: hookInput.session_id });
   const state = readState(hookInput.session_id);
   if (!state) return;
   const cwd = hookInput.cwd ?? state.projectPath;

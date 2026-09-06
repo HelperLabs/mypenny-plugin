@@ -43,10 +43,9 @@ function normalizeHookInput(input) {
   return out;
 }
 
-// plugins/mypenny-core/lib/state.ts
+// plugins/mypenny-core/lib/diag.ts
 import * as fs from "node:fs";
 import * as path2 from "node:path";
-import * as crypto from "node:crypto";
 
 // plugins/mypenny-core/lib/paths.ts
 import * as os from "node:os";
@@ -78,19 +77,57 @@ function claimsDir() {
 function authHealthPath() {
   return path.join(mypennyDir(), "auth-health.json");
 }
+function diagLogPath() {
+  return path.join(mypennyDir(), "logs", "hooks.log");
+}
+
+// plugins/mypenny-core/lib/diag.ts
+var MAX_BYTES = 256 * 1024;
+var diagContext = {};
+function setDiagContext(context) {
+  diagContext = { ...diagContext, ...context };
+}
+function diagEnabled() {
+  if (process.env.MYPENNY_SUBCONSCIOUS === "off") return false;
+  if (process.env.MYPENNY_DIAG?.trim().toLowerCase() === "off") return false;
+  return true;
+}
+function rotateIfNeeded(file) {
+  try {
+    const size = fs.statSync(file).size;
+    if (size >= MAX_BYTES) {
+      fs.renameSync(file, `${file}.1`);
+    }
+  } catch {
+  }
+}
+function recordDiag(record) {
+  if (!diagEnabled()) return;
+  try {
+    const file = diagLogPath();
+    fs.mkdirSync(path2.dirname(file), { recursive: true });
+    rotateIfNeeded(file);
+    const line = JSON.stringify({ at: Date.now(), ...diagContext, ...record }) + "\n";
+    fs.appendFileSync(file, line);
+  } catch {
+  }
+}
 
 // plugins/mypenny-core/lib/state.ts
+import * as fs2 from "node:fs";
+import * as path3 from "node:path";
+import * as crypto from "node:crypto";
 var STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1e3;
 var CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
 function ensureSessionsDir() {
-  fs.mkdirSync(sessionsDir(), { recursive: true });
+  fs2.mkdirSync(sessionsDir(), { recursive: true });
 }
 function cleanupMarkerPath() {
-  return path2.join(mypennyDir(), "last_cleanup");
+  return path3.join(mypennyDir(), "last_cleanup");
 }
 function readState(sessionId) {
   try {
-    const data = fs.readFileSync(sessionPath(sessionId), "utf-8");
+    const data = fs2.readFileSync(sessionPath(sessionId), "utf-8");
     return JSON.parse(data);
   } catch {
     return null;
@@ -100,8 +137,8 @@ function writeState(state) {
   ensureSessionsDir();
   const target = sessionPath(state.sessionId);
   const tmp = `${target}.${crypto.randomUUID()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-  fs.renameSync(tmp, target);
+  fs2.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs2.renameSync(tmp, target);
 }
 function createState(sessionId, projectPath) {
   const state = {
@@ -118,8 +155,17 @@ function hashContent(content) {
   return crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
 }
 function joinBundle(g) {
-  if (!g.userFacts && !g.subconscious && !g.codingGuidance) return "";
-  return `${g.userFacts}\0${g.subconscious}\0${g.codingGuidance}`;
+  const fields = [
+    g.userFacts,
+    g.subconscious,
+    g.codingGuidance,
+    g.memoryPolicy,
+    g.persona,
+    g.preferences,
+    g.contract
+  ];
+  if (fields.every((f) => !f)) return "";
+  return fields.join("\0");
 }
 function withGuidanceHash(state, guidance) {
   const joined = joinBundle(guidance);
@@ -130,23 +176,23 @@ function cleanupStaleSessions() {
   try {
     let lastCleanup = 0;
     try {
-      const data = fs.readFileSync(cleanupMarkerPath(), "utf-8");
+      const data = fs2.readFileSync(cleanupMarkerPath(), "utf-8");
       lastCleanup = parseInt(data, 10);
     } catch {
     }
     if (Date.now() - lastCleanup < CLEANUP_INTERVAL_MS) return;
-    fs.mkdirSync(path2.dirname(cleanupMarkerPath()), { recursive: true });
-    fs.writeFileSync(cleanupMarkerPath(), String(Date.now()));
-    if (!fs.existsSync(sessionsDir())) return;
-    const files = fs.readdirSync(sessionsDir());
+    fs2.mkdirSync(path3.dirname(cleanupMarkerPath()), { recursive: true });
+    fs2.writeFileSync(cleanupMarkerPath(), String(Date.now()));
+    if (!fs2.existsSync(sessionsDir())) return;
+    const files = fs2.readdirSync(sessionsDir());
     const now = Date.now();
     for (const file of files) {
       if (!file.endsWith(".json")) continue;
-      const filePath = path2.join(sessionsDir(), file);
+      const filePath = path3.join(sessionsDir(), file);
       try {
-        const stat = fs.statSync(filePath);
+        const stat = fs2.statSync(filePath);
         if (now - stat.mtimeMs > STALE_THRESHOLD_MS) {
-          fs.unlinkSync(filePath);
+          fs2.unlinkSync(filePath);
         }
       } catch {
       }
@@ -156,11 +202,11 @@ function cleanupStaleSessions() {
 }
 
 // plugins/mypenny-core/lib/auth-store.ts
-import * as fs3 from "node:fs";
+import * as fs4 from "node:fs";
 import * as crypto3 from "node:crypto";
 
 // plugins/mypenny-core/lib/auth-health.ts
-import * as fs2 from "node:fs";
+import * as fs3 from "node:fs";
 import * as crypto2 from "node:crypto";
 var RETRY_PENDING_HORIZON_MS = 12 * 60 * 1e3;
 var REJECTED_BACKOFF_MS = 6 * 60 * 60 * 1e3;
@@ -174,7 +220,7 @@ function asTime(value) {
 }
 function readAuthHealth() {
   try {
-    const parsed = JSON.parse(fs2.readFileSync(authHealthPath(), "utf-8"));
+    const parsed = JSON.parse(fs3.readFileSync(authHealthPath(), "utf-8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
       return {};
     }
@@ -192,11 +238,11 @@ function readAuthHealth() {
 }
 function writeAuthHealth(health) {
   try {
-    fs2.mkdirSync(mypennyDir(), { recursive: true });
+    fs3.mkdirSync(mypennyDir(), { recursive: true });
     const target = authHealthPath();
     const tmp = `${target}.${crypto2.randomUUID()}.tmp`;
-    fs2.writeFileSync(tmp, JSON.stringify(health) + "\n", { mode: 384 });
-    fs2.renameSync(tmp, target);
+    fs3.writeFileSync(tmp, JSON.stringify(health) + "\n", { mode: 384 });
+    fs3.renameSync(tmp, target);
   } catch (err) {
     debugLog(`[mypenny] auth-health write failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -218,11 +264,11 @@ function recordRequestUnauthorized(now = Date.now()) {
 }
 function clearAuthHealth() {
   try {
-    fs2.unlinkSync(authHealthPath());
+    fs3.unlinkSync(authHealthPath());
   } catch (err) {
     if (err?.code === "ENOENT") return;
     try {
-      fs2.writeFileSync(authHealthPath(), "{}\n", { mode: 384 });
+      fs3.writeFileSync(authHealthPath(), "{}\n", { mode: 384 });
     } catch (writeErr) {
       debugLog(
         `[mypenny] auth-health clear failed: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`
@@ -247,22 +293,22 @@ function authRepairNotice(health, now = Date.now()) {
 // plugins/mypenny-core/lib/auth-store.ts
 var DEFAULT_BASE_URL = "https://engine.mypenny.ai";
 function ensureDir() {
-  fs3.mkdirSync(mypennyDir(), { recursive: true });
+  fs4.mkdirSync(mypennyDir(), { recursive: true });
 }
 function atomicWrite(target, contents, mode) {
   ensureDir();
   const tmp = `${target}.${crypto3.randomUUID()}.tmp`;
-  fs3.writeFileSync(tmp, contents, { mode });
-  fs3.renameSync(tmp, target);
+  fs4.writeFileSync(tmp, contents, { mode });
+  fs4.renameSync(tmp, target);
   if (process.platform !== "win32") {
-    fs3.chmodSync(target, mode);
+    fs4.chmodSync(target, mode);
   }
 }
 function readToken() {
   const envToken = process.env.MYPENNY_TOKEN?.trim();
   if (envToken) return envToken;
   try {
-    return fs3.readFileSync(tokenPath(), "utf-8").trim() || null;
+    return fs4.readFileSync(tokenPath(), "utf-8").trim() || null;
   } catch {
     return null;
   }
@@ -273,7 +319,7 @@ function writeToken(token) {
 }
 function readConfig() {
   try {
-    const raw = fs3.readFileSync(configPath(), "utf-8");
+    const raw = fs4.readFileSync(configPath(), "utf-8");
     return JSON.parse(raw);
   } catch {
     return readEnvConfig();
@@ -305,55 +351,55 @@ function readEnvConfig() {
 }
 
 // plugins/mypenny-core/lib/project-key.ts
-import * as fs4 from "node:fs";
-import * as path3 from "node:path";
+import * as fs5 from "node:fs";
+import * as path4 from "node:path";
 function deriveProjectKey(cwd) {
   try {
     const gitRoot = findGitRoot(cwd);
     if (gitRoot) {
       const configPath2 = resolveGitConfigPath(gitRoot);
-      if (configPath2 && fs4.existsSync(configPath2)) {
-        const remote = parseOriginRemote(fs4.readFileSync(configPath2, "utf-8"));
+      if (configPath2 && fs5.existsSync(configPath2)) {
+        const remote = parseOriginRemote(fs5.readFileSync(configPath2, "utf-8"));
         if (remote) return sanitizeKey(remote);
       }
-      return sanitizeKey(path3.basename(gitRoot));
+      return sanitizeKey(path4.basename(gitRoot));
     }
   } catch {
   }
-  return sanitizeKey(path3.basename(cwd));
+  return sanitizeKey(path4.basename(cwd));
 }
 function findGitRoot(start) {
   let dir = start;
   for (let i = 0; i < 32; i++) {
-    const gitPath = path3.join(dir, ".git");
-    if (fs4.existsSync(gitPath)) return dir;
-    const parent = path3.dirname(dir);
+    const gitPath = path4.join(dir, ".git");
+    if (fs5.existsSync(gitPath)) return dir;
+    const parent = path4.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
   return null;
 }
 function resolveGitConfigPath(gitRoot) {
-  const gitPath = path3.join(gitRoot, ".git");
+  const gitPath = path4.join(gitRoot, ".git");
   try {
-    const stat = fs4.statSync(gitPath);
+    const stat = fs5.statSync(gitPath);
     if (stat.isDirectory()) {
-      return path3.join(gitPath, "config");
+      return path4.join(gitPath, "config");
     }
     if (stat.isFile()) {
-      const contents = fs4.readFileSync(gitPath, "utf-8");
+      const contents = fs5.readFileSync(gitPath, "utf-8");
       const match = contents.match(/^gitdir:\s*(.+)$/m);
       if (!match) return null;
-      const gitdir = path3.resolve(gitRoot, match[1].trim());
-      const commondirPath = path3.join(gitdir, "commondir");
-      if (fs4.existsSync(commondirPath)) {
-        const commondir = path3.resolve(
+      const gitdir = path4.resolve(gitRoot, match[1].trim());
+      const commondirPath = path4.join(gitdir, "commondir");
+      if (fs5.existsSync(commondirPath)) {
+        const commondir = path4.resolve(
           gitdir,
-          fs4.readFileSync(commondirPath, "utf-8").trim()
+          fs5.readFileSync(commondirPath, "utf-8").trim()
         );
-        return path3.join(commondir, "config");
+        return path4.join(commondir, "config");
       }
-      return path3.join(gitdir, "config");
+      return path4.join(gitdir, "config");
     }
   } catch {
     return null;
@@ -385,8 +431,8 @@ function sanitizeKey(raw) {
 }
 
 // plugins/mypenny-core/lib/claim.ts
-import * as fs5 from "node:fs";
-import * as path4 from "node:path";
+import * as fs6 from "node:fs";
+import * as path5 from "node:path";
 import * as crypto4 from "node:crypto";
 var KEEP_WINDOWS = 2;
 function claimStem(name) {
@@ -396,12 +442,12 @@ function claimStem(name) {
 }
 function prune(dir, stem, currentWindow) {
   try {
-    for (const file of fs5.readdirSync(dir)) {
+    for (const file of fs6.readdirSync(dir)) {
       if (!file.startsWith(`${stem}.`)) continue;
       const w = Number(file.slice(stem.length + 1));
       if (!Number.isFinite(w) || w > currentWindow - KEEP_WINDOWS) continue;
       try {
-        fs5.unlinkSync(path4.join(dir, file));
+        fs6.unlinkSync(path5.join(dir, file));
       } catch {
       }
     }
@@ -412,14 +458,14 @@ function claimWindow(name, windowMs, now = Date.now(), failOpen = true) {
   const dir = claimsDir();
   const stem = claimStem(name);
   const window = Math.floor(now / windowMs);
-  const target = path4.join(dir, `${stem}.${window}`);
+  const target = path5.join(dir, `${stem}.${window}`);
   try {
-    fs5.mkdirSync(dir, { recursive: true });
+    fs6.mkdirSync(dir, { recursive: true });
   } catch {
     return failOpen;
   }
   try {
-    fs5.closeSync(fs5.openSync(target, "wx"));
+    fs6.closeSync(fs6.openSync(target, "wx"));
   } catch (err) {
     if (err?.code === "EEXIST") return false;
     return failOpen;
@@ -531,27 +577,28 @@ async function withTokenRotation(attempt, token, timeoutMs) {
 }
 
 // plugins/mypenny-core/lib/guidance-cache.ts
-import * as fs6 from "node:fs";
-import * as path5 from "node:path";
+import * as fs7 from "node:fs";
+import * as path6 from "node:path";
 import * as crypto5 from "node:crypto";
 var GUIDANCE_TTL_MS = 10 * 60 * 1e3;
 function cacheFile(projectKey) {
   const safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown";
   const digest = crypto5.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
-  return path5.join(guidanceDir(), `${safe}.${digest}.json`);
+  return path6.join(guidanceDir(), `${safe}.${digest}.json`);
 }
 function writeGuidanceCache(projectKey, bundle, now = Date.now()) {
   try {
-    fs6.mkdirSync(guidanceDir(), { recursive: true });
+    fs7.mkdirSync(guidanceDir(), { recursive: true });
     const target = cacheFile(projectKey);
     const tmp = `${target}.${crypto5.randomUUID()}.tmp`;
     const payload = { bundle, fetchedAt: now };
-    fs6.writeFileSync(tmp, JSON.stringify(payload, null, 2));
+    fs7.writeFileSync(tmp, JSON.stringify(payload, null, 2), { mode: 384 });
     try {
-      fs6.renameSync(tmp, target);
+      fs7.renameSync(tmp, target);
+      if (process.platform !== "win32") fs7.chmodSync(target, 384);
     } catch (err) {
       try {
-        fs6.unlinkSync(tmp);
+        fs7.unlinkSync(tmp);
       } catch {
       }
       throw err;
@@ -560,8 +607,67 @@ function writeGuidanceCache(projectKey, bundle, now = Date.now()) {
   }
 }
 
+// plugins/mypenny-core/lib/format.ts
+function blocks(guidance) {
+  const out = [];
+  const push = (tag, raw) => {
+    const text = raw.trim();
+    if (text.length > 0) out.push({ tag, text });
+  };
+  push("operating_contract", guidance.contract);
+  push("persona", guidance.persona);
+  push("user_facts", guidance.userFacts);
+  push("preferences", guidance.preferences);
+  if (guidance.subconscious.trim().length > 0) {
+    out.push({
+      tag: `project_subconscious key="${guidance.projectKey}"`,
+      text: guidance.subconscious.trim()
+    });
+  }
+  push("coding_guidance", guidance.codingGuidance);
+  push("memory_policy", guidance.memoryPolicy);
+  return out;
+}
+function renderBlocks(guidance) {
+  let out = "";
+  for (const { tag, text } of blocks(guidance)) {
+    const close = tag.split(" ")[0];
+    out += `  <${tag}>
+    ${text}
+  </${close}>
+`;
+  }
+  return out;
+}
+function formatInjection(guidance, memories) {
+  const inner = renderBlocks(guidance);
+  const hasMem = memories.length > 0;
+  if (inner.length === 0 && !hasMem) return "";
+  let out = "<mypenny_subconscious>\n" + inner;
+  if (hasMem) {
+    out += "  <relevant_memories>\n";
+    for (const m of memories) {
+      const score = m.score.toFixed(2);
+      const tags = m.tags.join(", ");
+      const content = m.content.length > 300 ? m.content.slice(0, 300) + "..." : m.content;
+      out += `    [${score}] ${content} (tags: ${tags})
+`;
+    }
+    out += "  </relevant_memories>\n";
+  }
+  out += "</mypenny_subconscious>";
+  return out;
+}
+
 // plugins/mypenny-core/lib/memory-client.ts
 var TIMEOUT_MS = 6e3;
+var GUIDANCE_BLOCK_NAMES = [
+  "user_facts",
+  "persona",
+  "preferences",
+  "coding_guidance",
+  "memory_policy"
+];
 function debugEnabled() {
   const value = process.env.MYPENNY_DEBUG?.trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes";
@@ -572,7 +678,15 @@ function debugLog2(message) {
 async function callTool(name, args, timeoutMs = TIMEOUT_MS) {
   const token = readToken();
   const cfg = readConfig();
-  if (!token || !cfg) return null;
+  if (!token || !cfg) {
+    recordDiag({
+      event: "memory_tool",
+      outcome: "skip",
+      tool: name,
+      reason: !token ? "no_auth" : "no_config"
+    });
+    return null;
+  }
   return withTokenRotation(
     (bearer) => callToolOnce(name, args, bearer, cfg.memoryUrl, timeoutMs),
     token,
@@ -600,11 +714,25 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
     clearTimeout(timer);
     if (!response.ok) {
       debugLog2(`[mypenny] MCP tool ${name} failed: HTTP ${response.status}`);
+      recordDiag({
+        event: "memory_tool",
+        outcome: "fail",
+        tool: name,
+        reason: "http",
+        status: response.status
+      });
       return { unauthorized: response.status === 401, value: null };
     }
     const data = await response.json();
     if (data.error) {
       debugLog2(`[mypenny] MCP tool ${name} failed: ${data.error.message}`);
+      recordDiag({
+        event: "memory_tool",
+        outcome: "fail",
+        tool: name,
+        reason: "jsonrpc",
+        status: data.error.code
+      });
       return { unauthorized: false, value: null };
     }
     return {
@@ -612,9 +740,11 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
       value: data.result?.content?.find((c) => c.type === "text")?.text ?? null
     };
   } catch (err) {
+    const reason = err instanceof Error && err.name === "AbortError" ? "timeout" : "network";
     debugLog2(
       `[mypenny] MCP tool ${name} failed: ${err instanceof Error ? err.message : String(err)}`
     );
+    recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason });
     return { unauthorized: false, value: null };
   }
 }
@@ -623,11 +753,11 @@ async function fetchCoreMemoryBlocks(projectKey, timeoutMs) {
     "penny_get_profile",
     {
       projectKey,
-      blockNames: ["user_facts", "coding_guidance", `subconscious:${projectKey}`]
+      blockNames: [...GUIDANCE_BLOCK_NAMES, `subconscious:${projectKey}`]
     },
     timeoutMs
   );
-  if (raw === null) return { blocks: [], ok: false };
+  if (raw === null) return { blocks: [], contract: "", ok: false };
   try {
     const parsed = JSON.parse(raw);
     const byName = /* @__PURE__ */ new Map();
@@ -638,20 +768,30 @@ async function fetchCoreMemoryBlocks(projectKey, timeoutMs) {
         byName.set(b.blockName, { blockName: b.blockName, content: b.content || "" });
       }
     }
-    return { blocks: [...byName.values()], ok: true };
+    const contract = typeof parsed.contract === "string" ? parsed.contract : "";
+    return { blocks: [...byName.values()], contract, ok: true };
   } catch {
-    return { blocks: [], ok: false };
+    recordDiag({ event: "memory_tool", outcome: "fail", tool: "penny_get_profile", reason: "parse" });
+    return { blocks: [], contract: "", ok: false };
   }
 }
 async function fetchGuidance(cwd, timeoutMs) {
   const projectKey = deriveProjectKey(cwd);
-  const { blocks, ok } = await fetchCoreMemoryBlocks(projectKey, timeoutMs);
+  const { blocks: blocks2, contract, ok } = await fetchCoreMemoryBlocks(projectKey, timeoutMs);
+  const block = (name) => blocks2.find((b) => b.blockName === name)?.content ?? "";
   return {
     ok,
     guidance: {
-      userFacts: blocks.find((b) => b.blockName === "user_facts")?.content ?? "",
-      subconscious: blocks.find((b) => b.blockName === `subconscious:${projectKey}`)?.content ?? "",
-      codingGuidance: blocks.find((b) => b.blockName === "coding_guidance")?.content ?? "",
+      userFacts: block("user_facts"),
+      subconscious: block(`subconscious:${projectKey}`),
+      codingGuidance: block("coding_guidance"),
+      // memory_policy: how this user wants to be remembered (spec 2026-09-05).
+      // Empty string when the user has not taught Penny anything yet — the
+      // shipped guidance is the floor and this block holds only their deltas.
+      memoryPolicy: block("memory_policy"),
+      persona: block("persona"),
+      preferences: block("preferences"),
+      contract,
       projectKey
     }
   };
@@ -668,50 +808,9 @@ function armWatchdog(budgetMs, exitCode = 0) {
   return () => clearTimeout(timer);
 }
 
-// plugins/mypenny-core/lib/format.ts
-function formatInjection(guidance, memories) {
-  const hasUser = guidance.userFacts.trim().length > 0;
-  const hasSub = guidance.subconscious.trim().length > 0;
-  const hasCoding = guidance.codingGuidance.trim().length > 0;
-  const hasMem = memories.length > 0;
-  if (!hasUser && !hasSub && !hasCoding && !hasMem) return "";
-  let out = "<mypenny_subconscious>\n";
-  if (hasUser) {
-    out += `  <user_facts>
-    ${guidance.userFacts.trim()}
-  </user_facts>
-`;
-  }
-  if (hasSub) {
-    out += `  <project_subconscious key="${guidance.projectKey}">
-    ${guidance.subconscious.trim()}
-  </project_subconscious>
-`;
-  }
-  if (hasCoding) {
-    out += `  <coding_guidance>
-    ${guidance.codingGuidance.trim()}
-  </coding_guidance>
-`;
-  }
-  if (hasMem) {
-    out += "  <relevant_memories>\n";
-    for (const m of memories) {
-      const score = m.score.toFixed(2);
-      const tags = m.tags.join(", ");
-      const content = m.content.length > 300 ? m.content.slice(0, 300) + "..." : m.content;
-      out += `    [${score}] ${content} (tags: ${tags})
-`;
-    }
-    out += "  </relevant_memories>\n";
-  }
-  out += "</mypenny_subconscious>";
-  return out;
-}
-
 // plugins/mypenny-core/lib/version-check.ts
-import * as fs7 from "node:fs";
-import * as path6 from "node:path";
+import * as fs8 from "node:fs";
+import * as path7 from "node:path";
 import { fileURLToPath } from "node:url";
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var REGISTRY = "https://registry.npmjs.org";
@@ -750,7 +849,7 @@ function pluginNpmName(pluginName) {
 function readManifest(root) {
   for (const sub of MANIFEST_SUBPATHS) {
     try {
-      const raw = fs7.readFileSync(path6.join(root, ...sub), "utf8");
+      const raw = fs8.readFileSync(path7.join(root, ...sub), "utf8");
       const json = JSON.parse(raw);
       if (typeof json.name !== "string" || typeof json.version !== "string") continue;
       const npmName = pluginNpmName(json.name);
@@ -766,10 +865,10 @@ function resolveInstalledPlugin(fromDir) {
     const root = process.env[envVar];
     if (root) candidates.push(root);
   }
-  let dir = fromDir ?? path6.dirname(fileURLToPath(import.meta.url));
+  let dir = fromDir ?? path7.dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 8; i++) {
     candidates.push(dir);
-    const parent = path6.dirname(dir);
+    const parent = path7.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
@@ -795,7 +894,7 @@ async function fetchLatestVersion(npmName, fetchImpl, timeoutMs) {
 }
 function readCache() {
   try {
-    const parsed = JSON.parse(fs7.readFileSync(versionCheckPath(), "utf8"));
+    const parsed = JSON.parse(fs8.readFileSync(versionCheckPath(), "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -803,8 +902,8 @@ function readCache() {
 }
 function writeCache(cache) {
   try {
-    fs7.mkdirSync(path6.dirname(versionCheckPath()), { recursive: true });
-    fs7.writeFileSync(versionCheckPath(), JSON.stringify(cache), { mode: 384 });
+    fs8.mkdirSync(path7.dirname(versionCheckPath()), { recursive: true });
+    fs8.writeFileSync(versionCheckPath(), JSON.stringify(cache), { mode: 384 });
   } catch {
   }
 }
@@ -871,7 +970,10 @@ function codexToolLoadingNotice(host) {
     "penny_edit, penny_delete) are MCP tools that Codex loads on demand. If they",
     "are not in your available tools right now, they are deferred \u2014 NOT",
     'unavailable. Use the `tool_search` tool (query "mypenny" or "memory") to',
-    "load them, then call penny_session_start. Never tell the user their memory",
+    "load them, then call penny_session_start when private memory is allowed.",
+    "For Projects, penny_read target:projects works even without startup.",
+    "A workspace-only connection uses view:scopes, then an explicit workspaceId;",
+    "it cannot fall back to private memory. Never tell the user their memory",
     "is unavailable, or that a save failed, without first loading the tools via",
     "tool_search.",
     "</mypenny_tooling>"
@@ -880,7 +982,7 @@ function codexToolLoadingNotice(host) {
 
 // plugins/mypenny-core/scripts/session_start.ts
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import * as path7 from "node:path";
+import * as path8 from "node:path";
 var DEBUG = process.env.MYPENNY_DEBUG === "1";
 var debug = (...args) => {
   if (DEBUG) console.error("[mypenny:session_start]", ...args);
@@ -892,8 +994,9 @@ async function main() {
   const raw = await readHookInput();
   const hookInput = normalizeHookInput(raw);
   if (!hookInput) return;
+  setDiagContext({ hook: "session_start", sessionId: hookInput.session_id });
   if (!readToken()) {
-    const authScript = path7.join(path7.dirname(fileURLToPath2(import.meta.url)), "auth_login.mjs");
+    const authScript = path8.join(path8.dirname(fileURLToPath2(import.meta.url)), "auth_login.mjs");
     process.stderr.write(
       `[mypenny] plugin not authenticated. Run: node "${authScript}"
 `
@@ -902,7 +1005,7 @@ async function main() {
   }
   const repairNotice = authRepairNotice(readAuthHealth());
   if (repairNotice) {
-    const authScript = path7.join(path7.dirname(fileURLToPath2(import.meta.url)), "auth_login.mjs");
+    const authScript = path8.join(path8.dirname(fileURLToPath2(import.meta.url)), "auth_login.mjs");
     process.stderr.write(`[mypenny] ${repairNotice} Run: node "${authScript}"
 `);
     console.log(
@@ -919,7 +1022,7 @@ ${repairNotice} Tell the user to re-pair by running: node "${authScript}"
   cleanupStaleSessions();
   const { guidance, ok } = await fetchGuidance(hookInput.cwd, GUIDANCE_TIMEOUT_MS);
   debug(
-    `Guidance: project=${guidance.projectKey} user=${guidance.userFacts.length}b sub=${guidance.subconscious.length}b coding=${guidance.codingGuidance.length}b`
+    `Guidance: project=${guidance.projectKey} contract=${guidance.contract.length}b persona=${guidance.persona.length}b user=${guidance.userFacts.length}b prefs=${guidance.preferences.length}b sub=${guidance.subconscious.length}b coding=${guidance.codingGuidance.length}b policy=${guidance.memoryPolicy.length}b`
   );
   if (ok) writeGuidanceCache(guidance.projectKey, guidance);
   const output = formatInjection(guidance, []);

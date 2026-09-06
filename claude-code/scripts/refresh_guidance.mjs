@@ -24,6 +24,9 @@ function claimsDir() {
 function authHealthPath() {
   return path.join(mypennyDir(), "auth-health.json");
 }
+function diagLogPath() {
+  return path.join(mypennyDir(), "logs", "hooks.log");
+}
 
 // plugins/mypenny-core/lib/auth-health.ts
 import * as fs from "node:fs";
@@ -405,9 +408,10 @@ function writeGuidanceCache(projectKey, bundle, now = Date.now()) {
     const target = cacheFile(projectKey);
     const tmp = `${target}.${crypto4.randomUUID()}.tmp`;
     const payload = { bundle, fetchedAt: now };
-    fs5.writeFileSync(tmp, JSON.stringify(payload, null, 2));
+    fs5.writeFileSync(tmp, JSON.stringify(payload, null, 2), { mode: 384 });
     try {
       fs5.renameSync(tmp, target);
+      if (process.platform !== "win32") fs5.chmodSync(target, 384);
     } catch (err) {
       try {
         fs5.unlinkSync(tmp);
@@ -419,8 +423,49 @@ function writeGuidanceCache(projectKey, bundle, now = Date.now()) {
   }
 }
 
+// plugins/mypenny-core/lib/diag.ts
+import * as fs6 from "node:fs";
+import * as path5 from "node:path";
+var MAX_BYTES = 256 * 1024;
+var diagContext = {};
+function setDiagContext(context) {
+  diagContext = { ...diagContext, ...context };
+}
+function diagEnabled() {
+  if (process.env.MYPENNY_SUBCONSCIOUS === "off") return false;
+  if (process.env.MYPENNY_DIAG?.trim().toLowerCase() === "off") return false;
+  return true;
+}
+function rotateIfNeeded(file) {
+  try {
+    const size = fs6.statSync(file).size;
+    if (size >= MAX_BYTES) {
+      fs6.renameSync(file, `${file}.1`);
+    }
+  } catch {
+  }
+}
+function recordDiag(record) {
+  if (!diagEnabled()) return;
+  try {
+    const file = diagLogPath();
+    fs6.mkdirSync(path5.dirname(file), { recursive: true });
+    rotateIfNeeded(file);
+    const line = JSON.stringify({ at: Date.now(), ...diagContext, ...record }) + "\n";
+    fs6.appendFileSync(file, line);
+  } catch {
+  }
+}
+
 // plugins/mypenny-core/lib/memory-client.ts
 var TIMEOUT_MS = 6e3;
+var GUIDANCE_BLOCK_NAMES = [
+  "user_facts",
+  "persona",
+  "preferences",
+  "coding_guidance",
+  "memory_policy"
+];
 function debugEnabled() {
   const value = process.env.MYPENNY_DEBUG?.trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes";
@@ -431,7 +476,15 @@ function debugLog2(message) {
 async function callTool(name, args, timeoutMs = TIMEOUT_MS) {
   const token = readToken();
   const cfg = readConfig();
-  if (!token || !cfg) return null;
+  if (!token || !cfg) {
+    recordDiag({
+      event: "memory_tool",
+      outcome: "skip",
+      tool: name,
+      reason: !token ? "no_auth" : "no_config"
+    });
+    return null;
+  }
   return withTokenRotation(
     (bearer) => callToolOnce(name, args, bearer, cfg.memoryUrl, timeoutMs),
     token,
@@ -459,11 +512,25 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
     clearTimeout(timer);
     if (!response.ok) {
       debugLog2(`[mypenny] MCP tool ${name} failed: HTTP ${response.status}`);
+      recordDiag({
+        event: "memory_tool",
+        outcome: "fail",
+        tool: name,
+        reason: "http",
+        status: response.status
+      });
       return { unauthorized: response.status === 401, value: null };
     }
     const data = await response.json();
     if (data.error) {
       debugLog2(`[mypenny] MCP tool ${name} failed: ${data.error.message}`);
+      recordDiag({
+        event: "memory_tool",
+        outcome: "fail",
+        tool: name,
+        reason: "jsonrpc",
+        status: data.error.code
+      });
       return { unauthorized: false, value: null };
     }
     return {
@@ -471,9 +538,11 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
       value: data.result?.content?.find((c) => c.type === "text")?.text ?? null
     };
   } catch (err) {
+    const reason = err instanceof Error && err.name === "AbortError" ? "timeout" : "network";
     debugLog2(
       `[mypenny] MCP tool ${name} failed: ${err instanceof Error ? err.message : String(err)}`
     );
+    recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason });
     return { unauthorized: false, value: null };
   }
 }
@@ -482,11 +551,11 @@ async function fetchCoreMemoryBlocks(projectKey, timeoutMs) {
     "penny_get_profile",
     {
       projectKey,
-      blockNames: ["user_facts", "coding_guidance", `subconscious:${projectKey}`]
+      blockNames: [...GUIDANCE_BLOCK_NAMES, `subconscious:${projectKey}`]
     },
     timeoutMs
   );
-  if (raw === null) return { blocks: [], ok: false };
+  if (raw === null) return { blocks: [], contract: "", ok: false };
   try {
     const parsed = JSON.parse(raw);
     const byName = /* @__PURE__ */ new Map();
@@ -497,20 +566,30 @@ async function fetchCoreMemoryBlocks(projectKey, timeoutMs) {
         byName.set(b.blockName, { blockName: b.blockName, content: b.content || "" });
       }
     }
-    return { blocks: [...byName.values()], ok: true };
+    const contract = typeof parsed.contract === "string" ? parsed.contract : "";
+    return { blocks: [...byName.values()], contract, ok: true };
   } catch {
-    return { blocks: [], ok: false };
+    recordDiag({ event: "memory_tool", outcome: "fail", tool: "penny_get_profile", reason: "parse" });
+    return { blocks: [], contract: "", ok: false };
   }
 }
 async function fetchGuidance(cwd, timeoutMs) {
   const projectKey = deriveProjectKey(cwd);
-  const { blocks, ok } = await fetchCoreMemoryBlocks(projectKey, timeoutMs);
+  const { blocks, contract, ok } = await fetchCoreMemoryBlocks(projectKey, timeoutMs);
+  const block = (name) => blocks.find((b) => b.blockName === name)?.content ?? "";
   return {
     ok,
     guidance: {
-      userFacts: blocks.find((b) => b.blockName === "user_facts")?.content ?? "",
-      subconscious: blocks.find((b) => b.blockName === `subconscious:${projectKey}`)?.content ?? "",
-      codingGuidance: blocks.find((b) => b.blockName === "coding_guidance")?.content ?? "",
+      userFacts: block("user_facts"),
+      subconscious: block(`subconscious:${projectKey}`),
+      codingGuidance: block("coding_guidance"),
+      // memory_policy: how this user wants to be remembered (spec 2026-09-05).
+      // Empty string when the user has not taught Penny anything yet — the
+      // shipped guidance is the floor and this block holds only their deltas.
+      memoryPolicy: block("memory_policy"),
+      persona: block("persona"),
+      preferences: block("preferences"),
+      contract,
       projectKey
     }
   };
@@ -541,6 +620,7 @@ async function main() {
     debug("no cwd argument; nothing to refresh");
     return;
   }
+  setDiagContext({ hook: "refresh_guidance" });
   armWatchdog(WATCHDOG_MS);
   const projectKey = deriveProjectKey(cwd);
   const { guidance, ok } = await fetchGuidance(cwd);

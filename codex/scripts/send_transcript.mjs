@@ -1,6 +1,6 @@
 
 // plugins/mypenny-core/scripts/send_transcript.ts
-import * as fs6 from "node:fs";
+import * as fs7 from "node:fs";
 
 // plugins/mypenny-core/lib/hook-input.ts
 import * as readline from "node:readline";
@@ -73,6 +73,9 @@ function claimsDir() {
 }
 function authHealthPath() {
   return path.join(mypennyDir(), "auth-health.json");
+}
+function diagLogPath() {
+  return path.join(mypennyDir(), "logs", "hooks.log");
 }
 
 // plugins/mypenny-core/lib/state.ts
@@ -431,6 +434,40 @@ async function withTokenRotation(attempt, token, timeoutMs) {
   return second.value;
 }
 
+// plugins/mypenny-core/lib/diag.ts
+import * as fs5 from "node:fs";
+import * as path3 from "node:path";
+var MAX_BYTES = 256 * 1024;
+var diagContext = {};
+function setDiagContext(context) {
+  diagContext = { ...diagContext, ...context };
+}
+function diagEnabled() {
+  if (process.env.MYPENNY_SUBCONSCIOUS === "off") return false;
+  if (process.env.MYPENNY_DIAG?.trim().toLowerCase() === "off") return false;
+  return true;
+}
+function rotateIfNeeded(file) {
+  try {
+    const size = fs5.statSync(file).size;
+    if (size >= MAX_BYTES) {
+      fs5.renameSync(file, `${file}.1`);
+    }
+  } catch {
+  }
+}
+function recordDiag(record) {
+  if (!diagEnabled()) return;
+  try {
+    const file = diagLogPath();
+    fs5.mkdirSync(path3.dirname(file), { recursive: true });
+    rotateIfNeeded(file);
+    const line = JSON.stringify({ at: Date.now(), ...diagContext, ...record }) + "\n";
+    fs5.appendFileSync(file, line);
+  } catch {
+  }
+}
+
 // plugins/mypenny-core/lib/transcript-client.ts
 var TIMEOUT_MS = 3e4;
 function debugEnabled() {
@@ -444,7 +481,16 @@ async function sendTranscript(sessionId, projectKey, messages) {
   if (messages.length === 0) return true;
   const token = readToken();
   const cfg = readConfig();
-  if (!token || !cfg) return false;
+  if (!token || !cfg) {
+    recordDiag({
+      event: "transcript_ingest",
+      outcome: "skip",
+      hook: "stop",
+      sessionId,
+      reason: !token ? "no_auth" : "no_config"
+    });
+    return false;
+  }
   return withTokenRotation(
     (bearer) => ingestOnce(bearer, cfg.ingestUrl, sessionId, projectKey, messages),
     token
@@ -478,66 +524,92 @@ async function ingestOnce(token, ingestUrl, sessionId, projectKey, messages) {
       debugLog2(
         `[mypenny] transcript ingest failed: HTTP ${response.status}${detail ? ` ${detail}` : ""}`
       );
+      recordDiag({
+        event: "transcript_ingest",
+        outcome: "fail",
+        hook: "stop",
+        sessionId,
+        reason: "http",
+        status: response.status,
+        count: messages.length
+      });
+      return { unauthorized: response.status === 401, value: false };
     }
-    return { unauthorized: response.status === 401, value: response.ok };
+    recordDiag({
+      event: "transcript_ingest",
+      outcome: "ok",
+      hook: "stop",
+      sessionId,
+      count: messages.length
+    });
+    return { unauthorized: false, value: true };
   } catch (err) {
+    const reason = err instanceof Error && err.name === "AbortError" ? "timeout" : "network";
     debugLog2(
       `[mypenny] transcript ingest failed: ${err instanceof Error ? err.message : String(err)}`
     );
+    recordDiag({
+      event: "transcript_ingest",
+      outcome: "fail",
+      hook: "stop",
+      sessionId,
+      reason,
+      count: messages.length
+    });
     return { unauthorized: false, value: false };
   }
 }
 
 // plugins/mypenny-core/lib/project-key.ts
-import * as fs5 from "node:fs";
-import * as path3 from "node:path";
+import * as fs6 from "node:fs";
+import * as path4 from "node:path";
 function deriveProjectKey(cwd) {
   try {
     const gitRoot = findGitRoot(cwd);
     if (gitRoot) {
       const configPath2 = resolveGitConfigPath(gitRoot);
-      if (configPath2 && fs5.existsSync(configPath2)) {
-        const remote = parseOriginRemote(fs5.readFileSync(configPath2, "utf-8"));
+      if (configPath2 && fs6.existsSync(configPath2)) {
+        const remote = parseOriginRemote(fs6.readFileSync(configPath2, "utf-8"));
         if (remote) return sanitizeKey(remote);
       }
-      return sanitizeKey(path3.basename(gitRoot));
+      return sanitizeKey(path4.basename(gitRoot));
     }
   } catch {
   }
-  return sanitizeKey(path3.basename(cwd));
+  return sanitizeKey(path4.basename(cwd));
 }
 function findGitRoot(start) {
   let dir = start;
   for (let i = 0; i < 32; i++) {
-    const gitPath = path3.join(dir, ".git");
-    if (fs5.existsSync(gitPath)) return dir;
-    const parent = path3.dirname(dir);
+    const gitPath = path4.join(dir, ".git");
+    if (fs6.existsSync(gitPath)) return dir;
+    const parent = path4.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
   return null;
 }
 function resolveGitConfigPath(gitRoot) {
-  const gitPath = path3.join(gitRoot, ".git");
+  const gitPath = path4.join(gitRoot, ".git");
   try {
-    const stat = fs5.statSync(gitPath);
+    const stat = fs6.statSync(gitPath);
     if (stat.isDirectory()) {
-      return path3.join(gitPath, "config");
+      return path4.join(gitPath, "config");
     }
     if (stat.isFile()) {
-      const contents = fs5.readFileSync(gitPath, "utf-8");
+      const contents = fs6.readFileSync(gitPath, "utf-8");
       const match = contents.match(/^gitdir:\s*(.+)$/m);
       if (!match) return null;
-      const gitdir = path3.resolve(gitRoot, match[1].trim());
-      const commondirPath = path3.join(gitdir, "commondir");
-      if (fs5.existsSync(commondirPath)) {
-        const commondir = path3.resolve(
+      const gitdir = path4.resolve(gitRoot, match[1].trim());
+      const commondirPath = path4.join(gitdir, "commondir");
+      if (fs6.existsSync(commondirPath)) {
+        const commondir = path4.resolve(
           gitdir,
-          fs5.readFileSync(commondirPath, "utf-8").trim()
+          fs6.readFileSync(commondirPath, "utf-8").trim()
         );
-        return path3.join(commondir, "config");
+        return path4.join(commondir, "config");
       }
-      return path3.join(gitdir, "config");
+      return path4.join(gitdir, "config");
     }
   } catch {
     return null;
@@ -609,14 +681,15 @@ async function main() {
   const raw = await readHookInput();
   const hookInput = normalizeHookInput(raw);
   if (!hookInput) return;
+  setDiagContext({ hook: "stop", sessionId: hookInput.session_id });
   if (hookInput.stop_hook_active) return;
-  if (!hookInput.transcript_path || !fs6.existsSync(hookInput.transcript_path)) {
+  if (!hookInput.transcript_path || !fs7.existsSync(hookInput.transcript_path)) {
     debug("no transcript file");
     return;
   }
   const state = readState(hookInput.session_id);
   const lastSentLine = state?.lastSentLine || 0;
-  const fileContent = fs6.readFileSync(hookInput.transcript_path, "utf-8");
+  const fileContent = fs7.readFileSync(hookInput.transcript_path, "utf-8");
   const allLines = fileContent.split("\n").filter((l) => l.trim());
   const newLines = allLines.slice(lastSentLine);
   if (newLines.length === 0) {
@@ -651,10 +724,25 @@ async function main() {
     disarm();
   } else {
     debug("send failed \u2014 will retry next Stop hook");
+    recordDiag({
+      event: "transcript_pending",
+      outcome: "fail",
+      hook: "stop",
+      sessionId: hookInput.session_id,
+      pendingFromLine: lastSentLine,
+      count: messages.length
+    });
     process.exit(1);
   }
 }
 main().catch((err) => {
   if (DEBUG) console.error("[mypenny:send] error:", err);
+  recordDiag({
+    event: "transcript_ingest",
+    outcome: "fail",
+    hook: "stop",
+    reason: "crash",
+    detail: err instanceof Error ? err.name : typeof err
+  });
   process.exit(1);
 });
