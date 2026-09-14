@@ -21,8 +21,15 @@ user's timezone so those dates are right.
   `"area"`|`"project"`|`"heading"`): enumerate areas, projects, or headings to
   navigate the full tree. The digest is capped and omits headings, so reach
   for this when you need the complete structure or a project's headings.
-- **Organize** with `penny_write` (`entityType: "area"`/`"project"`/`"heading"`)
-  to create, or `penny_edit` (same `entityType`) to rename or archive, the
-  areas, projects, and headings that hold tasks.
+- **Organize areas and headings** with `penny_write` (`entityType: "area"` or
+  `"heading"`) to create, or `penny_edit` (same `entityType`) to rename. Areas
+  can also be archived; headings cannot. An area takes `name`; a heading takes
+  `title` and always its `projectId`. Edits identify the row with `orgId` —
+  so an area edit needs `orgId`, and a heading edit needs `orgId` plus
+  `projectId`.
+- **Organize Projects:** before creating or changing one, read `projects.md`:
+  task containers and ongoing objectives use the same Project records. Read its current Brief
+  before an edit and use `projectId`, `expectedRevision`, `operationId`, and a
+  sparse `patch`; reconcile revision conflicts before retrying.
 - A task is an actionable to-do; a note is durable knowledge. Capture an action
   item as a task, not a note — and don't double-store it as both.

@@ -219,7 +219,8 @@ cue fires; none of them needs to be in context otherwise.
 - `references/tasks.md` — read when the user mentions something they need to do,
   asks what is on their plate, or wants areas, projects, and headings organized.
 - `references/staleness-and-missing-tools.md` — read when the server has moved
-  ahead of this skill or the `penny_*` tools are absent this turn (below).
+  ahead of this skill, the attached tool schemas lack a documented capability,
+  or the `penny_*` tools are absent this turn (below).
 
 ## Staleness — when this skill is behind the server
 
@@ -230,3 +231,8 @@ read `references/staleness-and-missing-tools.md`. If the `penny_*` tools are
 simply not in your available tools this turn, that is not evidence MyPenny
 failed — the same file says how to reload them; never tell the user their memory
 is unavailable without trying.
+
+The host's attached tool schemas can also lag behind both this skill and the
+server. If a documented discriminator or argument is missing, read the same
+reference even when the catalog versions match; refreshing the skill alone
+does not refresh the host's tool schemas.

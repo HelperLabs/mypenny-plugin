@@ -6,8 +6,18 @@ import * as crypto2 from "node:crypto";
 // plugins/mypenny-core/lib/paths.ts
 import * as os from "node:os";
 import * as path from "node:path";
+
+// plugins/mypenny-core/lib/build-config.ts
+function buildBaseUrl() {
+  return "https://engine.mypenny.ai";
+}
+function buildStateDir() {
+  return ".mypenny";
+}
+
+// plugins/mypenny-core/lib/paths.ts
 function mypennyDir() {
-  return process.env.MYPENNY_HOME || path.join(os.homedir(), ".mypenny");
+  return process.env.MYPENNY_HOME || path.join(os.homedir(), buildStateDir());
 }
 function tokenPath() {
   return path.join(mypennyDir(), "token");
@@ -31,24 +41,19 @@ function diagLogPath() {
 // plugins/mypenny-core/lib/auth-health.ts
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
-var RETRY_PENDING_HORIZON_MS = 12 * 60 * 1e3;
-var REJECTED_BACKOFF_MS = 6 * 60 * 60 * 1e3;
-var REJECTION_THRESHOLD = 2;
-var REPAIR_EVIDENCE_HORIZON_MS = 24 * 60 * 60 * 1e3;
+var RETRY_PENDING_HORIZON_MS = 12 * 60 * 1e3, REJECTED_BACKOFF_MS = 6 * 60 * 60 * 1e3, REJECTION_THRESHOLD = 2, REPAIR_EVIDENCE_HORIZON_MS = 24 * 60 * 60 * 1e3;
 function debugLog(message) {
-  if (process.env.MYPENNY_DEBUG === "1") console.error(message);
+  process.env.MYPENNY_DEBUG === "1" && console.error(message);
 }
 function asTime(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+  return typeof value == "number" && Number.isFinite(value) ? value : void 0;
 }
 function readAuthHealth() {
   try {
-    const parsed = JSON.parse(fs.readFileSync(authHealthPath(), "utf-8"));
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    let parsed = JSON.parse(fs.readFileSync(authHealthPath(), "utf-8"));
+    if (parsed === null || typeof parsed != "object" || Array.isArray(parsed))
       return {};
-    }
-    const raw = parsed;
-    const count = asTime(raw.rotateRejections);
+    let raw = parsed, count = asTime(raw.rotateRejections);
     return {
       retryPendingAt: asTime(raw.retryPendingAt),
       rotateRejections: count === void 0 ? void 0 : Math.floor(count),
@@ -61,11 +66,10 @@ function readAuthHealth() {
 }
 function writeAuthHealth(health) {
   try {
-    fs.mkdirSync(mypennyDir(), { recursive: true });
-    const target = authHealthPath();
-    const tmp = `${target}.${crypto.randomUUID()}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(health) + "\n", { mode: 384 });
-    fs.renameSync(tmp, target);
+    fs.mkdirSync(mypennyDir(), { recursive: !0 });
+    let target = authHealthPath(), tmp = `${target}.${crypto.randomUUID()}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(health) + `
+`, { mode: 384 }), fs.renameSync(tmp, target);
   } catch (err) {
     debugLog(`[mypenny] auth-health write failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -74,8 +78,7 @@ function recordRotationRetryable(now = Date.now()) {
   writeAuthHealth({ ...readAuthHealth(), retryPendingAt: now });
 }
 function recordRotationRejected(now = Date.now()) {
-  const health = readAuthHealth();
-  const sameEpisode = health.lastRejectedAt !== void 0 && now - health.lastRejectedAt < REJECTED_BACKOFF_MS;
+  let health = readAuthHealth(), sameEpisode = health.lastRejectedAt !== void 0 && now - health.lastRejectedAt < REJECTED_BACKOFF_MS;
   writeAuthHealth({
     ...health,
     rotateRejections: sameEpisode ? (health.rotateRejections ?? 0) + 1 : 1,
@@ -91,7 +94,8 @@ function clearAuthHealth() {
   } catch (err) {
     if (err?.code === "ENOENT") return;
     try {
-      fs.writeFileSync(authHealthPath(), "{}\n", { mode: 384 });
+      fs.writeFileSync(authHealthPath(), `{}
+`, { mode: 384 });
     } catch (writeErr) {
       debugLog(
         `[mypenny] auth-health clear failed: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`
@@ -107,21 +111,17 @@ function rotationKnownRejected(health, now) {
 }
 
 // plugins/mypenny-core/lib/auth-store.ts
-var DEFAULT_BASE_URL = "https://engine.mypenny.ai";
+var DEFAULT_BASE_URL = buildBaseUrl();
 function ensureDir() {
-  fs2.mkdirSync(mypennyDir(), { recursive: true });
+  fs2.mkdirSync(mypennyDir(), { recursive: !0 });
 }
 function atomicWrite(target, contents, mode) {
   ensureDir();
-  const tmp = `${target}.${crypto2.randomUUID()}.tmp`;
-  fs2.writeFileSync(tmp, contents, { mode });
-  fs2.renameSync(tmp, target);
-  if (process.platform !== "win32") {
-    fs2.chmodSync(target, mode);
-  }
+  let tmp = `${target}.${crypto2.randomUUID()}.tmp`;
+  fs2.writeFileSync(tmp, contents, { mode }), fs2.renameSync(tmp, target), process.platform !== "win32" && fs2.chmodSync(target, mode);
 }
 function readToken() {
-  const envToken = process.env.MYPENNY_TOKEN?.trim();
+  let envToken = process.env.MYPENNY_TOKEN?.trim();
   if (envToken) return envToken;
   try {
     return fs2.readFileSync(tokenPath(), "utf-8").trim() || null;
@@ -130,34 +130,30 @@ function readToken() {
   }
 }
 function writeToken(token) {
-  atomicWrite(tokenPath(), token.trim(), 384);
-  clearAuthHealth();
+  atomicWrite(tokenPath(), token.trim(), 384), clearAuthHealth();
 }
 function readConfig() {
   try {
-    const raw = fs2.readFileSync(configPath(), "utf-8");
+    let raw = fs2.readFileSync(configPath(), "utf-8");
     return JSON.parse(raw);
   } catch {
     return readEnvConfig();
   }
 }
 function writeConfig(cfg) {
-  atomicWrite(configPath(), JSON.stringify(cfg, null, 2) + "\n", 420);
+  atomicWrite(configPath(), JSON.stringify(cfg, null, 2) + `
+`, 420);
 }
 function writeTokenExpiry(expiresAt, issuedAt) {
-  const cfg = readConfig();
+  let cfg = readConfig();
   if (!cfg) return;
-  const next = { ...cfg };
-  if (expiresAt === void 0) delete next.tokenExpiresAt;
-  else next.tokenExpiresAt = expiresAt;
-  if (issuedAt !== void 0) next.issuedAt = issuedAt;
-  writeConfig(next);
+  let next = { ...cfg };
+  expiresAt === void 0 ? delete next.tokenExpiresAt : next.tokenExpiresAt = expiresAt, issuedAt !== void 0 && (next.issuedAt = issuedAt), writeConfig(next);
 }
 function readEnvConfig() {
-  if (!process.env.MYPENNY_TOKEN && !process.env.MYPENNY_BASE_URL && !process.env.MYPENNY_MEMORY_URL && !process.env.MYPENNY_MCP_URL && !process.env.MYPENNY_INGEST_URL) {
+  if (!process.env.MYPENNY_TOKEN && !process.env.MYPENNY_BASE_URL && !process.env.MYPENNY_MEMORY_URL && !process.env.MYPENNY_MCP_URL && !process.env.MYPENNY_INGEST_URL)
     return null;
-  }
-  const baseUrl = process.env.MYPENNY_BASE_URL?.trim() || DEFAULT_BASE_URL;
+  let baseUrl = process.env.MYPENNY_BASE_URL?.trim() || DEFAULT_BASE_URL;
   return {
     memoryUrl: process.env.MYPENNY_MEMORY_URL?.trim() || process.env.MYPENNY_MCP_URL?.trim() || `${baseUrl}/mcp`,
     ingestUrl: process.env.MYPENNY_INGEST_URL?.trim() || `${baseUrl}/api/ingestTranscript`,
@@ -171,11 +167,11 @@ import * as fs3 from "node:fs";
 import * as path2 from "node:path";
 function deriveProjectKey(cwd) {
   try {
-    const gitRoot = findGitRoot(cwd);
+    let gitRoot = findGitRoot(cwd);
     if (gitRoot) {
-      const configPath2 = resolveGitConfigPath(gitRoot);
+      let configPath2 = resolveGitConfigPath(gitRoot);
       if (configPath2 && fs3.existsSync(configPath2)) {
-        const remote = parseOriginRemote(fs3.readFileSync(configPath2, "utf-8"));
+        let remote = parseOriginRemote(fs3.readFileSync(configPath2, "utf-8"));
         if (remote) return sanitizeKey(remote);
       }
       return sanitizeKey(path2.basename(gitRoot));
@@ -187,29 +183,26 @@ function deriveProjectKey(cwd) {
 function findGitRoot(start) {
   let dir = start;
   for (let i = 0; i < 32; i++) {
-    const gitPath = path2.join(dir, ".git");
+    let gitPath = path2.join(dir, ".git");
     if (fs3.existsSync(gitPath)) return dir;
-    const parent = path2.dirname(dir);
+    let parent = path2.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
   return null;
 }
 function resolveGitConfigPath(gitRoot) {
-  const gitPath = path2.join(gitRoot, ".git");
+  let gitPath = path2.join(gitRoot, ".git");
   try {
-    const stat = fs3.statSync(gitPath);
-    if (stat.isDirectory()) {
+    let stat = fs3.statSync(gitPath);
+    if (stat.isDirectory())
       return path2.join(gitPath, "config");
-    }
     if (stat.isFile()) {
-      const contents = fs3.readFileSync(gitPath, "utf-8");
-      const match = contents.match(/^gitdir:\s*(.+)$/m);
+      let match = fs3.readFileSync(gitPath, "utf-8").match(/^gitdir:\s*(.+)$/m);
       if (!match) return null;
-      const gitdir = path2.resolve(gitRoot, match[1].trim());
-      const commondirPath = path2.join(gitdir, "commondir");
+      let gitdir = path2.resolve(gitRoot, match[1].trim()), commondirPath = path2.join(gitdir, "commondir");
       if (fs3.existsSync(commondirPath)) {
-        const commondir = path2.resolve(
+        let commondir = path2.resolve(
           gitdir,
           fs3.readFileSync(commondirPath, "utf-8").trim()
         );
@@ -223,24 +216,22 @@ function resolveGitConfigPath(gitRoot) {
   return null;
 }
 function parseOriginRemote(configText) {
-  const lines = configText.split("\n");
-  let inOrigin = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
+  let lines = configText.split(`
+`), inOrigin = !1;
+  for (let line of lines) {
+    let trimmed = line.trim();
     if (trimmed.startsWith("[")) {
       inOrigin = trimmed === '[remote "origin"]';
       continue;
     }
     if (!inOrigin) continue;
-    const urlMatch = trimmed.match(/^url\s*=\s*(.+)$/);
+    let urlMatch = trimmed.match(/^url\s*=\s*(.+)$/);
     if (urlMatch) return extractRepoName(urlMatch[1]);
   }
   return null;
 }
 function extractRepoName(url) {
-  const cleaned = url.trim().replace(/\.git$/, "");
-  const lastSegment = cleaned.split(/[/:]/).pop();
-  return lastSegment || null;
+  return url.trim().replace(/\.git$/, "").split(/[/:]/).pop() || null;
 }
 function sanitizeKey(raw) {
   return raw.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unknown";
@@ -252,64 +243,51 @@ import * as path3 from "node:path";
 import * as crypto3 from "node:crypto";
 var KEEP_WINDOWS = 2;
 function claimStem(name) {
-  const safe = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "claim";
-  const digest = crypto3.createHash("sha256").update(name).digest("hex").slice(0, 8);
+  let safe = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "claim", digest = crypto3.createHash("sha256").update(name).digest("hex").slice(0, 8);
   return `${safe}.${digest}`;
 }
 function prune(dir, stem, currentWindow) {
   try {
-    for (const file of fs4.readdirSync(dir)) {
+    for (let file of fs4.readdirSync(dir)) {
       if (!file.startsWith(`${stem}.`)) continue;
-      const w = Number(file.slice(stem.length + 1));
-      if (!Number.isFinite(w) || w > currentWindow - KEEP_WINDOWS) continue;
-      try {
-        fs4.unlinkSync(path3.join(dir, file));
-      } catch {
-      }
+      let w = Number(file.slice(stem.length + 1));
+      if (!(!Number.isFinite(w) || w > currentWindow - KEEP_WINDOWS))
+        try {
+          fs4.unlinkSync(path3.join(dir, file));
+        } catch {
+        }
     }
   } catch {
   }
 }
-function claimWindow(name, windowMs, now = Date.now(), failOpen = true) {
-  const dir = claimsDir();
-  const stem = claimStem(name);
-  const window = Math.floor(now / windowMs);
-  const target = path3.join(dir, `${stem}.${window}`);
+function claimWindow(name, windowMs, now = Date.now(), failOpen = !0) {
+  let dir = claimsDir(), stem = claimStem(name), window = Math.floor(now / windowMs), target = path3.join(dir, `${stem}.${window}`);
   try {
-    fs4.mkdirSync(dir, { recursive: true });
+    fs4.mkdirSync(dir, { recursive: !0 });
   } catch {
     return failOpen;
   }
   try {
     fs4.closeSync(fs4.openSync(target, "wx"));
   } catch (err) {
-    if (err?.code === "EEXIST") return false;
-    return failOpen;
+    return err?.code === "EEXIST" ? !1 : failOpen;
   }
-  prune(dir, stem, window);
-  return true;
+  return prune(dir, stem, window), !0;
 }
 
 // plugins/mypenny-core/lib/token-rotation.ts
-var ROTATION_TIMEOUT_MS = 8e3;
-var PROACTIVE_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1e3;
-var ROTATION_RETRY_WINDOW_MS = 2 * 60 * 1e3;
-var RENEW_AFTER_FRACTION = 2 / 3;
-var rotationAttempted = false;
+var ROTATION_TIMEOUT_MS = 8e3, PROACTIVE_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1e3, ROTATION_RETRY_WINDOW_MS = 2 * 60 * 1e3, RENEW_AFTER_FRACTION = 2 / 3, rotationAttempted = !1;
 function tokenIsEnvPinned() {
-  return Boolean(process.env.MYPENNY_TOKEN?.trim());
+  return !!process.env.MYPENNY_TOKEN?.trim();
 }
 function renewalIsDue(cfg, now) {
-  if (!cfg) return false;
-  if (cfg.tokenExpiresAt === void 0) return true;
-  const issuedAt = cfg.issuedAt && cfg.issuedAt > 0 ? cfg.issuedAt : void 0;
-  if (issuedAt === void 0) {
-    const NOMINAL_LIFETIME_MS = 30 * 24 * 60 * 60 * 1e3;
-    return now >= cfg.tokenExpiresAt - NOMINAL_LIFETIME_MS / 3;
-  }
-  const lifetime = cfg.tokenExpiresAt - issuedAt;
-  if (lifetime <= 0) return true;
-  return now - issuedAt >= lifetime * RENEW_AFTER_FRACTION;
+  if (!cfg) return !1;
+  if (cfg.tokenExpiresAt === void 0) return !0;
+  let issuedAt = cfg.issuedAt && cfg.issuedAt > 0 ? cfg.issuedAt : void 0;
+  if (issuedAt === void 0)
+    return now >= cfg.tokenExpiresAt - 2592e6 / 3;
+  let lifetime = cfg.tokenExpiresAt - issuedAt;
+  return lifetime <= 0 ? !0 : now - issuedAt >= lifetime * RENEW_AFTER_FRACTION;
 }
 function rotationUrl(memoryUrl) {
   try {
@@ -319,19 +297,13 @@ function rotationUrl(memoryUrl) {
   }
 }
 async function rotateToken(timeoutMs = ROTATION_TIMEOUT_MS) {
-  if (rotationAttempted) return null;
-  rotationAttempted = true;
-  if (tokenIsEnvPinned()) return null;
-  const token = readToken();
-  const cfg = readConfig();
+  if (rotationAttempted || (rotationAttempted = !0, tokenIsEnvPinned())) return null;
+  let token = readToken(), cfg = readConfig();
   if (!token || !cfg) return null;
-  const url = rotationUrl(cfg.memoryUrl);
-  if (!url) return null;
-  if (rotationKnownRejected(readAuthHealth(), Date.now())) return null;
+  let url = rotationUrl(cfg.memoryUrl);
+  if (!url || rotationKnownRejected(readAuthHealth(), Date.now())) return null;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const response = await fetch(url, {
+    let controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs), response = await fetch(url, {
       method: "POST",
       headers: {
         // The boundary requires a declared JSON media type on POST; the
@@ -342,24 +314,14 @@ async function rotateToken(timeoutMs = ROTATION_TIMEOUT_MS) {
       body: "{}",
       signal: controller.signal
     });
-    clearTimeout(timer);
-    if (!response.ok) {
-      if (response.status === 400 || response.status === 401 || response.status === 403) {
-        recordRotationRejected();
-      } else if (response.status !== 429) {
-        recordRotationRetryable();
-      }
-      return null;
-    }
-    const data = await response.json();
-    const next = typeof data.access_token === "string" ? data.access_token.trim() : "";
-    if (!next.startsWith("mpt_")) {
-      recordRotationRetryable();
-      return null;
-    }
+    if (clearTimeout(timer), !response.ok)
+      return response.status === 400 || response.status === 401 || response.status === 403 ? recordRotationRejected() : response.status !== 429 && recordRotationRetryable(), null;
+    let data = await response.json(), next = typeof data.access_token == "string" ? data.access_token.trim() : "";
+    if (!next.startsWith("mpt_"))
+      return recordRotationRetryable(), null;
     writeToken(next);
-    const expiresIn = typeof data.expires_in === "number" && Number.isFinite(data.expires_in) ? data.expires_in : void 0;
-    writeTokenExpiry(
+    let expiresIn = typeof data.expires_in == "number" && Number.isFinite(data.expires_in) ? data.expires_in : void 0;
+    return writeTokenExpiry(
       expiresIn === void 0 ? void 0 : Date.now() + expiresIn * 1e3,
       // Refresh the issue time too (#1410): renewal timing measures "two
       // thirds of life" against issuedAt, so leaving the ORIGINAL pairing
@@ -367,29 +329,22 @@ async function rotateToken(timeoutMs = ROTATION_TIMEOUT_MS) {
       // recorded age passed two thirds of the recorded lifetime, renewal was
       // permanently due (~4 needless rotations/day, bounded by the 6h claim).
       Date.now()
-    );
-    return next;
+    ), next;
   } catch {
-    recordRotationRetryable();
-    return null;
+    return recordRotationRetryable(), null;
   }
 }
 async function withTokenRotation(attempt, token, timeoutMs) {
   let active = token;
-  if (!tokenIsEnvPinned() && renewalIsDue(readConfig(), Date.now())) {
-    const allowed = claimWindow("token-rotate", PROACTIVE_ROTATION_WINDOW_MS) || rotationRetryPending(readAuthHealth(), Date.now()) && claimWindow("token-rotate-retry", ROTATION_RETRY_WINDOW_MS);
-    if (allowed) {
-      const renewed = await rotateToken(timeoutMs);
-      if (renewed) active = renewed;
-    }
+  if (!tokenIsEnvPinned() && renewalIsDue(readConfig(), Date.now()) && (claimWindow("token-rotate", PROACTIVE_ROTATION_WINDOW_MS) || rotationRetryPending(readAuthHealth(), Date.now()) && claimWindow("token-rotate-retry", ROTATION_RETRY_WINDOW_MS))) {
+    let renewed = await rotateToken(timeoutMs);
+    renewed && (active = renewed);
   }
-  const first = await attempt(active);
+  let first = await attempt(active);
   if (!first.unauthorized) return first.value;
-  if (!tokenIsEnvPinned()) recordRequestUnauthorized();
-  const rotated = await rotateToken(timeoutMs);
-  if (!rotated) return first.value;
-  const second = await attempt(rotated);
-  return second.value;
+  tokenIsEnvPinned() || recordRequestUnauthorized();
+  let rotated = await rotateToken(timeoutMs);
+  return rotated ? (await attempt(rotated)).value : first.value;
 }
 
 // plugins/mypenny-core/lib/guidance-cache.ts
@@ -398,20 +353,16 @@ import * as path4 from "node:path";
 import * as crypto4 from "node:crypto";
 var GUIDANCE_TTL_MS = 10 * 60 * 1e3;
 function cacheFile(projectKey) {
-  const safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown";
-  const digest = crypto4.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
+  let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto4.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
   return path4.join(guidanceDir(), `${safe}.${digest}.json`);
 }
 function writeGuidanceCache(projectKey, bundle, now = Date.now()) {
   try {
-    fs5.mkdirSync(guidanceDir(), { recursive: true });
-    const target = cacheFile(projectKey);
-    const tmp = `${target}.${crypto4.randomUUID()}.tmp`;
-    const payload = { bundle, fetchedAt: now };
-    fs5.writeFileSync(tmp, JSON.stringify(payload, null, 2), { mode: 384 });
+    fs5.mkdirSync(guidanceDir(), { recursive: !0 });
+    let target = cacheFile(projectKey), tmp = `${target}.${crypto4.randomUUID()}.tmp`;
+    fs5.writeFileSync(tmp, JSON.stringify({ bundle, fetchedAt: now }, null, 2), { mode: 384 });
     try {
-      fs5.renameSync(tmp, target);
-      if (process.platform !== "win32") fs5.chmodSync(target, 384);
+      fs5.renameSync(tmp, target), process.platform !== "win32" && fs5.chmodSync(target, 384);
     } catch (err) {
       try {
         fs5.unlinkSync(tmp);
@@ -426,40 +377,33 @@ function writeGuidanceCache(projectKey, bundle, now = Date.now()) {
 // plugins/mypenny-core/lib/diag.ts
 import * as fs6 from "node:fs";
 import * as path5 from "node:path";
-var MAX_BYTES = 256 * 1024;
-var diagContext = {};
+var MAX_BYTES = 256 * 1024, diagContext = {};
 function setDiagContext(context) {
   diagContext = { ...diagContext, ...context };
 }
 function diagEnabled() {
-  if (process.env.MYPENNY_SUBCONSCIOUS === "off") return false;
-  if (process.env.MYPENNY_DIAG?.trim().toLowerCase() === "off") return false;
-  return true;
+  return !(process.env.MYPENNY_SUBCONSCIOUS === "off" || process.env.MYPENNY_DIAG?.trim().toLowerCase() === "off");
 }
 function rotateIfNeeded(file) {
   try {
-    const size = fs6.statSync(file).size;
-    if (size >= MAX_BYTES) {
-      fs6.renameSync(file, `${file}.1`);
-    }
+    fs6.statSync(file).size >= MAX_BYTES && fs6.renameSync(file, `${file}.1`);
   } catch {
   }
 }
 function recordDiag(record) {
-  if (!diagEnabled()) return;
-  try {
-    const file = diagLogPath();
-    fs6.mkdirSync(path5.dirname(file), { recursive: true });
-    rotateIfNeeded(file);
-    const line = JSON.stringify({ at: Date.now(), ...diagContext, ...record }) + "\n";
-    fs6.appendFileSync(file, line);
-  } catch {
-  }
+  if (diagEnabled())
+    try {
+      let file = diagLogPath();
+      fs6.mkdirSync(path5.dirname(file), { recursive: !0 }), rotateIfNeeded(file);
+      let line = JSON.stringify({ at: Date.now(), ...diagContext, ...record }) + `
+`;
+      fs6.appendFileSync(file, line);
+    } catch {
+    }
 }
 
 // plugins/mypenny-core/lib/memory-client.ts
-var TIMEOUT_MS = 6e3;
-var GUIDANCE_BLOCK_NAMES = [
+var TIMEOUT_MS = 6e3, GUIDANCE_BLOCK_NAMES = [
   "user_facts",
   "persona",
   "preferences",
@@ -467,25 +411,20 @@ var GUIDANCE_BLOCK_NAMES = [
   "memory_policy"
 ];
 function debugEnabled() {
-  const value = process.env.MYPENNY_DEBUG?.trim().toLowerCase();
+  let value = process.env.MYPENNY_DEBUG?.trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes";
 }
 function debugLog2(message) {
-  if (debugEnabled()) console.error(message);
+  debugEnabled() && console.error(message);
 }
 async function callTool(name, args, timeoutMs = TIMEOUT_MS) {
-  const token = readToken();
-  const cfg = readConfig();
-  if (!token || !cfg) {
-    recordDiag({
-      event: "memory_tool",
-      outcome: "skip",
-      tool: name,
-      reason: !token ? "no_auth" : "no_config"
-    });
-    return null;
-  }
-  return withTokenRotation(
+  let token = readToken(), cfg = readConfig();
+  return !token || !cfg ? (recordDiag({
+    event: "memory_tool",
+    outcome: "skip",
+    tool: name,
+    reason: token ? "no_config" : "no_auth"
+  }), null) : withTokenRotation(
     (bearer) => callToolOnce(name, args, bearer, cfg.memoryUrl, timeoutMs),
     token,
     timeoutMs
@@ -493,9 +432,7 @@ async function callTool(name, args, timeoutMs = TIMEOUT_MS) {
 }
 async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS) {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const response = await fetch(memoryUrl, {
+    let controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs), response = await fetch(memoryUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -509,45 +446,34 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
       }),
       signal: controller.signal
     });
-    clearTimeout(timer);
-    if (!response.ok) {
-      debugLog2(`[mypenny] MCP tool ${name} failed: HTTP ${response.status}`);
-      recordDiag({
+    if (clearTimeout(timer), !response.ok)
+      return debugLog2(`[mypenny] MCP tool ${name} failed: HTTP ${response.status}`), recordDiag({
         event: "memory_tool",
         outcome: "fail",
         tool: name,
         reason: "http",
         status: response.status
-      });
-      return { unauthorized: response.status === 401, value: null };
-    }
-    const data = await response.json();
-    if (data.error) {
-      debugLog2(`[mypenny] MCP tool ${name} failed: ${data.error.message}`);
-      recordDiag({
-        event: "memory_tool",
-        outcome: "fail",
-        tool: name,
-        reason: "jsonrpc",
-        status: data.error.code
-      });
-      return { unauthorized: false, value: null };
-    }
-    return {
-      unauthorized: false,
+      }), { unauthorized: response.status === 401, value: null };
+    let data = await response.json();
+    return data.error ? (debugLog2(`[mypenny] MCP tool ${name} failed: ${data.error.message}`), recordDiag({
+      event: "memory_tool",
+      outcome: "fail",
+      tool: name,
+      reason: "jsonrpc",
+      status: data.error.code
+    }), { unauthorized: !1, value: null }) : {
+      unauthorized: !1,
       value: data.result?.content?.find((c) => c.type === "text")?.text ?? null
     };
   } catch (err) {
-    const reason = err instanceof Error && err.name === "AbortError" ? "timeout" : "network";
-    debugLog2(
+    let reason = err instanceof Error && err.name === "AbortError" ? "timeout" : "network";
+    return debugLog2(
       `[mypenny] MCP tool ${name} failed: ${err instanceof Error ? err.message : String(err)}`
-    );
-    recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason });
-    return { unauthorized: false, value: null };
+    ), recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason }), { unauthorized: !1, value: null };
   }
 }
 async function fetchCoreMemoryBlocks(projectKey, timeoutMs) {
-  const raw = await callTool(
+  let raw = await callTool(
     "penny_get_profile",
     {
       projectKey,
@@ -555,28 +481,21 @@ async function fetchCoreMemoryBlocks(projectKey, timeoutMs) {
     },
     timeoutMs
   );
-  if (raw === null) return { blocks: [], contract: "", ok: false };
+  if (raw === null) return { blocks: [], contract: "", ok: !1 };
   try {
-    const parsed = JSON.parse(raw);
-    const byName = /* @__PURE__ */ new Map();
-    for (const group of [parsed.global, parsed.workspace]) {
-      if (!Array.isArray(group)) continue;
-      for (const b of group) {
-        if (typeof b?.blockName !== "string") continue;
-        byName.set(b.blockName, { blockName: b.blockName, content: b.content || "" });
-      }
-    }
-    const contract = typeof parsed.contract === "string" ? parsed.contract : "";
-    return { blocks: [...byName.values()], contract, ok: true };
+    let parsed = JSON.parse(raw), byName = /* @__PURE__ */ new Map();
+    for (let group of [parsed.global, parsed.workspace])
+      if (Array.isArray(group))
+        for (let b of group)
+          typeof b?.blockName == "string" && byName.set(b.blockName, { blockName: b.blockName, content: b.content || "" });
+    let contract = typeof parsed.contract == "string" ? parsed.contract : "";
+    return { blocks: [...byName.values()], contract, ok: !0 };
   } catch {
-    recordDiag({ event: "memory_tool", outcome: "fail", tool: "penny_get_profile", reason: "parse" });
-    return { blocks: [], contract: "", ok: false };
+    return recordDiag({ event: "memory_tool", outcome: "fail", tool: "penny_get_profile", reason: "parse" }), { blocks: [], contract: "", ok: !1 };
   }
 }
 async function fetchGuidance(cwd, timeoutMs) {
-  const projectKey = deriveProjectKey(cwd);
-  const { blocks, contract, ok } = await fetchCoreMemoryBlocks(projectKey, timeoutMs);
-  const block = (name) => blocks.find((b) => b.blockName === name)?.content ?? "";
+  let projectKey = deriveProjectKey(cwd), { blocks, contract, ok } = await fetchCoreMemoryBlocks(projectKey, timeoutMs), block = (name) => blocks.find((b) => b.blockName === name)?.content ?? "";
   return {
     ok,
     guidance: {
@@ -599,41 +518,33 @@ async function fetchGuidance(cwd, timeoutMs) {
 function armWatchdog(budgetMs, exitCode = 0) {
   if (!Number.isFinite(budgetMs) || budgetMs <= 0) return () => {
   };
-  const timer = setTimeout(() => {
+  let timer = setTimeout(() => {
     process.exit(exitCode);
   }, budgetMs);
-  timer.unref?.();
-  return () => clearTimeout(timer);
+  return timer.unref?.(), () => clearTimeout(timer);
 }
 
 // plugins/mypenny-core/scripts/refresh_guidance.ts
-var DEBUG = process.env.MYPENNY_DEBUG === "1";
-var debug = (...args) => {
-  if (DEBUG) console.error("[mypenny:refresh]", ...args);
-};
-var WATCHDOG_MS = 2e4;
+var DEBUG = process.env.MYPENNY_DEBUG === "1", debug = (...args) => {
+  DEBUG && console.error("[mypenny:refresh]", ...args);
+}, WATCHDOG_MS = 2e4;
 async function main() {
-  if (process.env.MYPENNY_SUBCONSCIOUS === "off") return;
-  if (!readToken()) return;
-  const cwd = process.argv[2];
+  if (process.env.MYPENNY_SUBCONSCIOUS === "off" || !readToken()) return;
+  let cwd = process.argv[2];
   if (!cwd) {
     debug("no cwd argument; nothing to refresh");
     return;
   }
-  setDiagContext({ hook: "refresh_guidance" });
-  armWatchdog(WATCHDOG_MS);
-  const projectKey = deriveProjectKey(cwd);
-  const { guidance, ok } = await fetchGuidance(cwd);
+  setDiagContext({ hook: "refresh_guidance" }), armWatchdog(WATCHDOG_MS);
+  let projectKey = deriveProjectKey(cwd), { guidance, ok } = await fetchGuidance(cwd);
   if (!ok) {
     debug(`fetch failed for project=${projectKey}; leaving cache untouched`);
     return;
   }
-  writeGuidanceCache(projectKey, guidance);
-  debug(
+  writeGuidanceCache(projectKey, guidance), debug(
     `cached project=${projectKey} user=${guidance.userFacts.length}b sub=${guidance.subconscious.length}b coding=${guidance.codingGuidance.length}b`
   );
 }
 main().catch((err) => {
-  if (DEBUG) console.error("[mypenny:refresh] error:", err);
-  process.exit(0);
+  DEBUG && console.error("[mypenny:refresh] error:", err), process.exit(0);
 });

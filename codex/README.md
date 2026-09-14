@@ -5,6 +5,12 @@ definition, MyPenny skill, and lifecycle hooks; hook behavior lives in
 `@mypenny/core`.
 Codex exposes the installed plugin directory through `CODEX_PLUGIN_ROOT`.
 
+The bundled MCP server URL is a literal in `.mcp.json` with **no environment
+override** — `${VAR}` templating there breaks installation on some hosts (#814),
+so the endpoint is resolved when the plugin is built, not when it is run. To
+point Codex at another engine, add your own MCP server to `~/.codex/config.toml`
+instead of editing the installed plugin, which the next update would overwrite.
+
 ## Relationship To The ChatGPT App
 
 The ChatGPT App and Codex plugin share the MyPenny MCP server, but they do not

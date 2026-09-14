@@ -1,8 +1,9 @@
 # Staleness, and when the Penny tools are missing
 
 Read this when `meta.catalogVersion` is higher than the version this skill
-targets, when a call fails with `Unknown tool`, or when the `penny_*` tools
-are simply not in your available tools this turn.
+targets, when a call fails with `Unknown tool`, when the host's attached tool
+schemas lack a documented discriminator or argument, or when the `penny_*`
+tools are simply not in your available tools this turn.
 
 ## Staleness — when this skill is behind the server
 
@@ -20,6 +21,22 @@ On either signal, trust the server's current tool list and the guidance
 update the MyPenny plugin (or remove and re-add the MyPenny connector) to
 refresh it. A plugin-update notice injected at session start says the same
 about the plugin as a whole — relay it to the user.
+
+## When the host's tool schemas are behind
+
+The installed skill, live server, and host's attached tool definitions can
+refresh separately. A matching `meta.catalogVersion` does not prove the host
+has refreshed its schemas. For example, catalog 0.4.0 documents `penny_read`
+(`target: "projects"`) and Project writes with `patch`, `expectedRevision`,
+and `operationId`; an attached schema without those fields may be an older
+snapshot even though this skill is current.
+
+Use the host's tool-discovery or refresh capability when available, then inspect
+the attached schema again. If it still lacks the needed fields, explain the
+specific mismatch and ask the user to refresh the connector or start a fresh
+conversation. Do not force undeclared arguments, substitute a legacy operation,
+or drop scope or revision fields to make a write fit. Continue supported work
+and preserve any pending update until the required capability is available.
 
 ## When the Penny tools are missing entirely — absent is not down
 
@@ -39,11 +56,12 @@ So when the tools are absent:
   attached to this turn and that you'll reconnect them — don't degrade silently
   into "I can't access your memory."
 - **Reload them yourself first.** If your host lets you search for tools on
-  demand, use that to load the Penny tools before doing anything else — in Codex,
-  call the `tool_search` tool (query "mypenny" or "memory"), then
-  `penny_session_start`. A new user message also re-hydrates a deferred
-  connector, so if you can't search, ask the user to send one more message rather
-  than giving up.
+  demand, use its available discovery mechanism to load the Penny tools
+  (search for "mypenny" or "memory"); do not assume a tool named `tool_search`
+  exists on every host. Call `penny_session_start` if you have not already
+  oriented this conversation. If you can't search, ask the user to send one
+  more message first — a new turn re-attaches a deferred connector on many
+  hosts, and it costs far less than a reconnect.
 - If they stay missing across several turns, have the user refresh the connector:
   update the MyPenny plugin, or remove and re-add the MyPenny connector.
 - If durable content came up while the tools were gone, **put that content in

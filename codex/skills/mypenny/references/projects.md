@@ -36,6 +36,10 @@ It is not a second summary to maintain. All of it belongs to the user.
   fields. Create with `patch.name`, `patch.purpose`, and an `operationId` without
   `projectId`. On conflict, reread and reconcile; never change only the revision
   and replay a stale patch over user edits. Source edits stay in their own tools.
+  For an older Project whose Brief has `legacy: true`, the first revision also
+  needs `expectedUpdatedAt` from that Brief's `updatedAt`, alongside
+  `expectedRevision: 0`. A `revision_required` response means reread and supply
+  the required version fields; do not keep retrying with only a revision number.
 - **Connect:** automatically attach authorized resources created for or deliberately
   used in the Project; suggest other useful links. Removed links stay removed
   until explicitly restored. Suggested Plan steps are not commitments; accept
