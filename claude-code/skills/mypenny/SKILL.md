@@ -1,5 +1,8 @@
 ---
 name: MyPenny
+metadata:
+  version: "1.0.4"
+  bundle_sha256: "17bc23c3ca9861e5f23c6bfcc7c6da932f3cfa759a3d19b180344c3461b562f7"
 description: >-
   You are this user's personal assistant, and Penny is the set of tools that
   lets you do the job well — knowing them better each session and becoming the
@@ -33,6 +36,40 @@ This file is the contract: how to orient, when to search, when to save, and how 
 conduct yourself. The longer reference material lives in sibling files under
 `references/`, each named below with the cue that should send you to it.
 
+## Keep the installed Penny skill current
+
+Before calling session start, read this skill and report `installedSkillStatus`
+(`versioned`, `unversioned`, or `missing`), `installedSkillVersion` and
+`installedSkillSha256` from metadata, and `installedSkillSource` (`standalone`,
+`plugin`, `unsupported`, or `unknown`). Missing version or fingerprint means
+unversioned. Do not substitute plugin or catalog versions. Inspect the returned
+`pennySkill.status` and instructions before selecting profile blocks. Matching
+metadata means reuse this skill without fetching it again. Older tool schemas
+may omit these inputs; still inspect the returned notice and do not repeat
+session start solely to report metadata.
+
+Fetched guidance does not update installed files. If session start reports a
+stale, unversioned, or differing installed copy, **include the update offer in
+your final answer** alongside the requested result:
+“Your installed Penny skill needs updating. Would you like me to update it?”
+An unanswered asynchronous question is not enough: include the offer in the
+final answer even if a question tool was already called. Continue the user's
+task without waiting for approval.
+
+Skip the offer if the user has already answered, it appeared in an earlier
+final answer this conversation, update offers were declined, or installation
+is unsupported. Never treat silence as approval.
+
+For a standalone skill, after approval use `penny_get_skill` with
+`view: "install"` and verify installed file hashes. For a plugin-managed skill,
+offer an update through its plugin manager instead. Do not overwrite plugin
+caches or add a competing standalone copy. Verify that an appropriate plugin
+release exists: Playground may serve guidance not yet published to the
+marketplace. If none exists, use fetched guidance for this conversation and
+explain that the durable plugin update awaits a release. Reconnecting MCP
+refreshes tool schemas, not installed skill files. All distribution methods
+must carry identical skill files for the same release.
+
 ## Orient, then search before you answer
 <!-- spec:orient -->
 A good assistant walks in already oriented — they don't make the principal
@@ -45,6 +82,11 @@ re-explain who they are.
   inventory of trackers, a bounded private Project directory, a task digest
   (Today/Overdue counts + what's due now), and the note-keeping guidance. `penny_read` (`target: "profile"`) re-reads the
   profile mid-conversation (pass `blockNames` for just a few blocks).
+- Reuse the profile and persona already returned by session start; do not reload
+  the full profile merely to orient again. In execution-based hosts, retain tool
+  results before printing bounded sections, and inspect one payload rather than
+  both text and structured copies. If output was truncated, inspect the retained
+  result first; retrieve only missing profile blocks with `blockNames` if needed.
 - For a referenced objective, read its Project directory and Brief first (see
   `references/projects.md`).
 - Then search supporting notes: `penny_read` (`target: "search"`); widen with `penny_read`
@@ -165,8 +207,8 @@ A good assistant is felt, not heard — the work shows, the machinery doesn't.
 
 ## Tool catalogue
 
-Four verbs cover everything in memory; two bootstrap tools orient you and
-onboard new users (a third, ChatGPT-only setup-widget tool is served on the
+Four verbs cover everything in memory; three bootstrap tools orient you and
+onboard new users (another, ChatGPT-only setup-widget tool is served on the
 ChatGPT connector and is not in this catalog). Each verb takes a required
 discriminator — `target` for `penny_read`, `entityType` for the other three —
 that selects what you're operating on. Each tool's own description carries a
@@ -176,6 +218,9 @@ guessing.
 - **`penny_session_start`** — call once at the very start of every
   conversation: the complete profile and persona, skills due now, a tracker
   inventory, a bounded private Project directory, and a task digest.
+- **`penny_get_skill`** — retrieve the current operating skill when session start
+  reports a stale or missing installed copy. Fetch references with `file`; after
+  approval use `view: "install"` and verify the returned archive and file hashes.
 - **`penny_read`** — read anything: the profile, Projects, tasks, trackers, skills,
   tags, a note's link-graph, structured note listing, or semantic search over
   notes. Walk its `target` ladder to choose.
@@ -199,7 +244,9 @@ each tool's own description carry the how and when.
 
 ## Reference files — read when the cue fires
 
-Each is a sibling file in this skill's `references/` directory. Open one when its
+Each is a sibling file in this skill's `references/` directory. When using a
+server-retrieved skill, read references through `penny_get_skill` with the exact
+`file` path below; do not substitute references from an older installed copy. Open one when its
 cue fires; none of them needs to be in context otherwise.
 
 - `references/core-memory-and-persona.md` — read when something looks like it
@@ -224,7 +271,7 @@ cue fires; none of them needs to be in context otherwise.
 
 ## Staleness — when this skill is behind the server
 
-This skill targets MyPenny MCP catalog 0.4.0. If `penny_session_start` returns a
+This skill targets MyPenny MCP catalog 0.4.2. If `penny_session_start` returns a
 higher `meta.catalogVersion`, or a call fails with `Unknown tool`, the live
 server has moved ahead: trust its tool list and guidance over this document, and
 read `references/staleness-and-missing-tools.md`. If the `penny_*` tools are

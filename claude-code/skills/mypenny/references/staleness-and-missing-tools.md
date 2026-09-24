@@ -7,7 +7,7 @@ tools are simply not in your available tools this turn.
 
 ## Staleness — when this skill is behind the server
 
-This skill targets MyPenny MCP catalog 0.4.0. Two signals mean the live server
+This skill targets MyPenny MCP catalog 0.4.2. Two signals mean the live server
 has moved ahead of it:
 
 - **At session start**, `penny_session_start` returns the live

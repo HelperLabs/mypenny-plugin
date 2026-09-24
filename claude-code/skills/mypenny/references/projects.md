@@ -46,7 +46,7 @@ It is not a second summary to maintain. All of it belongs to the user.
   them as To-dos only with user/current standing authorization. Skills supply
   reusable methods, trackers supply measurements, notes supply knowledge, and
   To-dos supply canonical work state. Before following a linked Skill method,
-  invoke it with `penny_read` (`target: "skills"`, `view: "invoke"`) so its
+  invoke it with `penny_write` (`entityType: "skill_invoke"`) so its
   execution guard and provenance apply. A link does not copy or share its source.
 - **Propose further work:** accepted Project upkeep is automatic; substantive next
   work needs this request or an applicable scoped standing instruction. Ownership,
