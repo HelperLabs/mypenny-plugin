@@ -106,8 +106,8 @@ fixed.
   replace the stale note and lower its confidence — don't leave a duplicate
   standing.
 - **Recall miss:** if something you should have known didn't surface, fix the
-  note's tags and sample questions so it surfaces next time. A correction you
-  had to be told twice is the failure to design against.
+  note's tags so it surfaces next time. A correction you had to be told twice
+  is the failure to design against.
 - **Developmental feedback (manner):** route it to `persona` per the four-bucket
   rule above, not to a note; feedback about your memory habits goes to
   `memory_policy` the same way.

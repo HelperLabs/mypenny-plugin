@@ -80,7 +80,7 @@ function setDiagContext(context) {
 // plugins/mypenny-core/lib/state.ts
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
-var STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1e3, CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
+var STALE_THRESHOLD_MS = 10080 * 60 * 1e3, CLEANUP_INTERVAL_MS = 1440 * 60 * 1e3;
 function ensureSessionsDir() {
   fs.mkdirSync(sessionsDir(), { recursive: !0 });
 }
@@ -117,8 +117,8 @@ function joinBundle(g) {
 import * as fs2 from "node:fs";
 
 // plugins/mypenny-core/lib/auth-health.ts
-var RETRY_PENDING_HORIZON_MS = 12 * 60 * 1e3, REJECTED_BACKOFF_MS = 6 * 60 * 60 * 1e3;
-var REPAIR_EVIDENCE_HORIZON_MS = 24 * 60 * 60 * 1e3;
+var RETRY_PENDING_HORIZON_MS = 720 * 1e3, REJECTED_BACKOFF_MS = 360 * 60 * 1e3;
+var REPAIR_EVIDENCE_HORIZON_MS = 1440 * 60 * 1e3;
 
 // plugins/mypenny-core/lib/auth-store.ts
 var DEFAULT_BASE_URL = buildBaseUrl();
@@ -246,13 +246,13 @@ function claimWindow(name, windowMs, now = Date.now(), failOpen = !0) {
 }
 
 // plugins/mypenny-core/lib/token-rotation.ts
-var PROACTIVE_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1e3, ROTATION_RETRY_WINDOW_MS = 2 * 60 * 1e3, RENEW_AFTER_FRACTION = 2 / 3;
+var PROACTIVE_ROTATION_WINDOW_MS = 360 * 60 * 1e3, ROTATION_RETRY_WINDOW_MS = 120 * 1e3, RENEW_AFTER_FRACTION = 2 / 3;
 
 // plugins/mypenny-core/lib/guidance-cache.ts
 import * as fs5 from "node:fs";
 import * as path4 from "node:path";
 import * as crypto3 from "node:crypto";
-var GUIDANCE_TTL_MS = 10 * 60 * 1e3;
+var GUIDANCE_TTL_MS = 600 * 1e3;
 function cacheFile(projectKey) {
   let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto3.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
   return path4.join(guidanceDir(), `${safe}.${digest}.json`);

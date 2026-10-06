@@ -117,7 +117,7 @@ function recordDiag(record) {
 import * as fs2 from "node:fs";
 import * as path3 from "node:path";
 import * as crypto from "node:crypto";
-var STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1e3, CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
+var STALE_THRESHOLD_MS = 10080 * 60 * 1e3, CLEANUP_INTERVAL_MS = 1440 * 60 * 1e3;
 function ensureSessionsDir() {
   fs2.mkdirSync(sessionsDir(), { recursive: !0 });
 }
@@ -196,7 +196,7 @@ import * as crypto3 from "node:crypto";
 // plugins/mypenny-core/lib/auth-health.ts
 import * as fs3 from "node:fs";
 import * as crypto2 from "node:crypto";
-var RETRY_PENDING_HORIZON_MS = 12 * 60 * 1e3, REJECTED_BACKOFF_MS = 6 * 60 * 60 * 1e3, REJECTION_THRESHOLD = 2, REPAIR_EVIDENCE_HORIZON_MS = 24 * 60 * 60 * 1e3;
+var RETRY_PENDING_HORIZON_MS = 720 * 1e3, REJECTED_BACKOFF_MS = 360 * 60 * 1e3, REJECTION_THRESHOLD = 2, REPAIR_EVIDENCE_HORIZON_MS = 1440 * 60 * 1e3;
 function debugLog(message) {
   process.env.MYPENNY_DEBUG === "1" && console.error(message);
 }
@@ -437,7 +437,7 @@ function claimWindow(name, windowMs, now = Date.now(), failOpen = !0) {
 }
 
 // plugins/mypenny-core/lib/token-rotation.ts
-var ROTATION_TIMEOUT_MS = 8e3, PROACTIVE_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1e3, ROTATION_RETRY_WINDOW_MS = 2 * 60 * 1e3, RENEW_AFTER_FRACTION = 2 / 3, rotationAttempted = !1;
+var ROTATION_TIMEOUT_MS = 8e3, PROACTIVE_ROTATION_WINDOW_MS = 360 * 60 * 1e3, ROTATION_RETRY_WINDOW_MS = 120 * 1e3, RENEW_AFTER_FRACTION = 2 / 3, rotationAttempted = !1;
 function tokenIsEnvPinned() {
   return !!process.env.MYPENNY_TOKEN?.trim();
 }
@@ -512,7 +512,7 @@ async function withTokenRotation(attempt, token, timeoutMs) {
 import * as fs7 from "node:fs";
 import * as path6 from "node:path";
 import * as crypto5 from "node:crypto";
-var GUIDANCE_TTL_MS = 10 * 60 * 1e3;
+var GUIDANCE_TTL_MS = 600 * 1e3;
 function cacheFile(projectKey) {
   let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto5.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
   return path6.join(guidanceDir(), `${safe}.${digest}.json`);
@@ -702,7 +702,7 @@ function armWatchdog(budgetMs, exitCode = 0) {
 import * as fs8 from "node:fs";
 import * as path7 from "node:path";
 import { fileURLToPath } from "node:url";
-var DAY_MS = 24 * 60 * 60 * 1e3, REGISTRY = "https://registry.npmjs.org", PLUGIN_ROOT_ENV_VARS = ["CLAUDE_PLUGIN_ROOT", "CODEX_PLUGIN_ROOT", "PLUGIN_ROOT"], MANIFEST_SUBPATHS = [
+var DAY_MS = 1440 * 60 * 1e3, REGISTRY = "https://registry.npmjs.org", PLUGIN_ROOT_ENV_VARS = ["CLAUDE_PLUGIN_ROOT", "CODEX_PLUGIN_ROOT", "PLUGIN_ROOT"], MANIFEST_SUBPATHS = [
   [".claude-plugin", "plugin.json"],
   [".codex-plugin", "plugin.json"]
 ];

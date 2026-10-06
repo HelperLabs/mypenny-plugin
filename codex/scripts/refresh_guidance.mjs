@@ -41,7 +41,7 @@ function diagLogPath() {
 // plugins/mypenny-core/lib/auth-health.ts
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
-var RETRY_PENDING_HORIZON_MS = 12 * 60 * 1e3, REJECTED_BACKOFF_MS = 6 * 60 * 60 * 1e3, REJECTION_THRESHOLD = 2, REPAIR_EVIDENCE_HORIZON_MS = 24 * 60 * 60 * 1e3;
+var RETRY_PENDING_HORIZON_MS = 720 * 1e3, REJECTED_BACKOFF_MS = 360 * 60 * 1e3, REJECTION_THRESHOLD = 2, REPAIR_EVIDENCE_HORIZON_MS = 1440 * 60 * 1e3;
 function debugLog(message) {
   process.env.MYPENNY_DEBUG === "1" && console.error(message);
 }
@@ -276,7 +276,7 @@ function claimWindow(name, windowMs, now = Date.now(), failOpen = !0) {
 }
 
 // plugins/mypenny-core/lib/token-rotation.ts
-var ROTATION_TIMEOUT_MS = 8e3, PROACTIVE_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1e3, ROTATION_RETRY_WINDOW_MS = 2 * 60 * 1e3, RENEW_AFTER_FRACTION = 2 / 3, rotationAttempted = !1;
+var ROTATION_TIMEOUT_MS = 8e3, PROACTIVE_ROTATION_WINDOW_MS = 360 * 60 * 1e3, ROTATION_RETRY_WINDOW_MS = 120 * 1e3, RENEW_AFTER_FRACTION = 2 / 3, rotationAttempted = !1;
 function tokenIsEnvPinned() {
   return !!process.env.MYPENNY_TOKEN?.trim();
 }
@@ -351,7 +351,7 @@ async function withTokenRotation(attempt, token, timeoutMs) {
 import * as fs5 from "node:fs";
 import * as path4 from "node:path";
 import * as crypto4 from "node:crypto";
-var GUIDANCE_TTL_MS = 10 * 60 * 1e3;
+var GUIDANCE_TTL_MS = 600 * 1e3;
 function cacheFile(projectKey) {
   let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto4.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
   return path4.join(guidanceDir(), `${safe}.${digest}.json`);

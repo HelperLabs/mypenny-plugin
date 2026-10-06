@@ -35,8 +35,8 @@ function authHealthPath() {
 
 // plugins/mypenny-core/lib/auth-health.ts
 import * as fs from "node:fs";
-var RETRY_PENDING_HORIZON_MS = 12 * 60 * 1e3, REJECTED_BACKOFF_MS = 6 * 60 * 60 * 1e3;
-var REPAIR_EVIDENCE_HORIZON_MS = 24 * 60 * 60 * 1e3;
+var RETRY_PENDING_HORIZON_MS = 720 * 1e3, REJECTED_BACKOFF_MS = 360 * 60 * 1e3;
+var REPAIR_EVIDENCE_HORIZON_MS = 1440 * 60 * 1e3;
 function debugLog(message) {
   process.env.MYPENNY_DEBUG === "1" && console.error(message);
 }

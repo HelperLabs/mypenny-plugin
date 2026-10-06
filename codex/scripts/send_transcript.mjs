@@ -1,3 +1,8 @@
+var __defProp = Object.defineProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: !0 });
+};
 
 // plugins/mypenny-core/scripts/send_transcript.ts
 import * as fs7 from "node:fs";
@@ -85,7 +90,7 @@ function diagLogPath() {
 }
 
 // plugins/mypenny-core/lib/state.ts
-var STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1e3, CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1e3;
+var STALE_THRESHOLD_MS = 10080 * 60 * 1e3, CLEANUP_INTERVAL_MS = 1440 * 60 * 1e3;
 function ensureSessionsDir() {
   fs.mkdirSync(sessionsDir(), { recursive: !0 });
 }
@@ -155,7 +160,7 @@ import * as crypto3 from "node:crypto";
 // plugins/mypenny-core/lib/auth-health.ts
 import * as fs2 from "node:fs";
 import * as crypto2 from "node:crypto";
-var RETRY_PENDING_HORIZON_MS = 12 * 60 * 1e3, REJECTED_BACKOFF_MS = 6 * 60 * 60 * 1e3, REJECTION_THRESHOLD = 2, REPAIR_EVIDENCE_HORIZON_MS = 24 * 60 * 60 * 1e3;
+var RETRY_PENDING_HORIZON_MS = 720 * 1e3, REJECTED_BACKOFF_MS = 360 * 60 * 1e3, REJECTION_THRESHOLD = 2, REPAIR_EVIDENCE_HORIZON_MS = 1440 * 60 * 1e3;
 function debugLog(message) {
   process.env.MYPENNY_DEBUG === "1" && console.error(message);
 }
@@ -315,7 +320,7 @@ function claimWindow(name, windowMs, now = Date.now(), failOpen = !0) {
 }
 
 // plugins/mypenny-core/lib/token-rotation.ts
-var ROTATION_TIMEOUT_MS = 8e3, PROACTIVE_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1e3, ROTATION_RETRY_WINDOW_MS = 2 * 60 * 1e3, RENEW_AFTER_FRACTION = 2 / 3, rotationAttempted = !1;
+var ROTATION_TIMEOUT_MS = 8e3, PROACTIVE_ROTATION_WINDOW_MS = 360 * 60 * 1e3, ROTATION_RETRY_WINDOW_MS = 120 * 1e3, RENEW_AFTER_FRACTION = 2 / 3, rotationAttempted = !1;
 function tokenIsEnvPinned() {
   return !!process.env.MYPENNY_TOKEN?.trim();
 }
@@ -423,7 +428,7 @@ function debugEnabled() {
 function debugLog2(message) {
   debugEnabled() && console.error(message);
 }
-async function sendTranscript(sessionId, projectKey, messages) {
+async function sendTranscript(sessionId, projectKey, messages, metadata = {}) {
   if (messages.length === 0) return !0;
   let token = readToken(), cfg = readConfig();
   return !token || !cfg ? (recordDiag({
@@ -433,11 +438,11 @@ async function sendTranscript(sessionId, projectKey, messages) {
     sessionId,
     reason: token ? "no_config" : "no_auth"
   }), !1) : withTokenRotation(
-    (bearer) => ingestOnce(bearer, cfg.ingestUrl, sessionId, projectKey, messages),
+    (bearer) => ingestOnce(bearer, cfg.ingestUrl, sessionId, projectKey, messages, metadata),
     token
   );
 }
-async function ingestOnce(token, ingestUrl, sessionId, projectKey, messages) {
+async function ingestOnce(token, ingestUrl, sessionId, projectKey, messages, metadata) {
   try {
     let controller = new AbortController(), timer = setTimeout(() => controller.abort(), TIMEOUT_MS), response = await fetch(ingestUrl, {
       method: "POST",
@@ -448,7 +453,9 @@ async function ingestOnce(token, ingestUrl, sessionId, projectKey, messages) {
       body: JSON.stringify({
         sessionId,
         projectKey,
-        messages
+        messages,
+        ...metadata.sourceStartedAt === void 0 ? {} : { sourceStartedAt: metadata.sourceStartedAt },
+        ...metadata.legacyProjectKey === void 0 ? {} : { legacyProjectKey: metadata.legacyProjectKey }
       }),
       signal: controller.signal
     });
@@ -494,6 +501,10 @@ async function ingestOnce(token, ingestUrl, sessionId, projectKey, messages) {
 }
 
 // plugins/mypenny-core/lib/project-key.ts
+var project_key_exports = {};
+__export(project_key_exports, {
+  deriveProjectKey: () => deriveProjectKey
+});
 import * as fs6 from "node:fs";
 import * as path4 from "node:path";
 function deriveProjectKey(cwd) {
@@ -578,6 +589,22 @@ function armWatchdog(budgetMs, exitCode = 0) {
   return timer.unref?.(), () => clearTimeout(timer);
 }
 
+// plugins/mypenny-core/lib/transcript-source-clock.ts
+function transcriptSourceStartedAt(lines) {
+  let earliest = 1 / 0;
+  for (let raw of lines)
+    try {
+      let line = JSON.parse(raw), role = line.type || line.role || line.message?.role;
+      if (role !== "user" && role !== "assistant") continue;
+      let timestamp = typeof line.timestamp == "number" ? line.timestamp : typeof line.timestamp == "string" ? Date.parse(line.timestamp) : NaN;
+      if (!Number.isFinite(timestamp) || timestamp <= 0) return 0;
+      earliest = Math.min(earliest, timestamp);
+    } catch {
+      return 0;
+    }
+  return Number.isFinite(earliest) ? earliest : 0;
+}
+
 // plugins/mypenny-core/scripts/send_transcript.ts
 var DEBUG = process.env.MYPENNY_DEBUG === "1", MAX_MESSAGE_LENGTH = 2e3, WATCHDOG_MS = 11e4, debug = (...args) => {
   DEBUG && console.error("[mypenny:send]", ...args);
@@ -625,8 +652,11 @@ async function main() {
     state && writeState({ ...state, lastSentLine: allLines.length });
     return;
   }
-  let projectKey = deriveProjectKey(hookInput.cwd);
-  await sendTranscript(hookInput.session_id, projectKey, messages) ? (debug("sent successfully"), state && writeState({ ...state, lastSentLine: allLines.length }), disarm()) : (debug("send failed \u2014 will retry next Stop hook"), recordDiag({
+  let keyDerivers = project_key_exports, { projectKey, legacyProjectKey } = keyDerivers.deriveProjectKeys?.(hookInput.cwd) ?? { projectKey: keyDerivers.deriveProjectKey(hookInput.cwd), legacyProjectKey: void 0 };
+  await sendTranscript(hookInput.session_id, projectKey, messages, {
+    sourceStartedAt: transcriptSourceStartedAt(allLines),
+    legacyProjectKey
+  }) ? (debug("sent successfully"), state && writeState({ ...state, lastSentLine: allLines.length }), disarm()) : (debug("send failed \u2014 will retry next Stop hook"), recordDiag({
     event: "transcript_pending",
     outcome: "fail",
     hook: "stop",
