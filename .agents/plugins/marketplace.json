@@ -4,13 +4,13 @@
     "name": "HelperLabs"
   },
   "metadata": {
-    "description": "Secure, portable AI memory for your coding tools — MyPenny brings your memories and notes into Claude Code and Codex."
+    "description": "Secure, portable AI memory for your coding tools — Penny brings your memories and notes into Claude Code and Codex."
   },
   "plugins": [
     {
       "name": "mypenny-codex",
       "source": "./codex",
-      "description": "MyPenny memory for Codex"
+      "description": "Penny memory for Codex"
     }
   ]
 }

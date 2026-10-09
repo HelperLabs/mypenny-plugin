@@ -268,7 +268,7 @@ function authNeedsRepair(health, now = Date.now()) {
   return (health.rotateRejections ?? 0) >= REJECTION_THRESHOLD && health.lastRejectedAt !== void 0 && now - health.lastRejectedAt < REPAIR_EVIDENCE_HORIZON_MS && health.requestUnauthorizedAt !== void 0 && now - health.requestUnauthorizedAt < REPAIR_EVIDENCE_HORIZON_MS;
 }
 function authRepairNotice(health, now = Date.now()) {
-  return authNeedsRepair(health, now) ? "MyPenny can no longer authenticate: this install's access token was replaced or revoked, and the server is refusing to renew it. Memory and transcript capture are paused until you re-pair." : null;
+  return authNeedsRepair(health, now) ? "Penny can no longer authenticate: this install's access token was replaced or revoked, and the server is refusing to renew it. Memory and transcript capture are paused until you re-pair." : null;
 }
 
 // plugins/mypenny-core/lib/auth-store.ts
@@ -804,7 +804,7 @@ async function checkPluginFreshness(opts = {}) {
     fetched && (entry.latestVersion = fetched), entry.checkedAt = now, mutated = !0;
   }
   let latest = entry.latestVersion ?? null, cmp = latest === null ? null : compareSemver(installed.version, latest);
-  return latest === null || cmp === null || cmp >= 0 || entry.lastNotifiedVersion === latest && typeof entry.lastNotifiedAt == "number" && now - entry.lastNotifiedAt < ttlMs ? (mutated && (cache[installed.npmName] = entry, writeCache(cache)), null) : (entry.lastNotifiedVersion = latest, entry.lastNotifiedAt = now, cache[installed.npmName] = entry, writeCache(cache), `MyPenny plugin update available: installed ${installed.version}, latest ${latest}. Updating refreshes the memory skill and MCP tool catalog. Let the user know they can update the MyPenny plugin via their plugin marketplace (or reinstall ${installed.npmName}).`);
+  return latest === null || cmp === null || cmp >= 0 || entry.lastNotifiedVersion === latest && typeof entry.lastNotifiedAt == "number" && now - entry.lastNotifiedAt < ttlMs ? (mutated && (cache[installed.npmName] = entry, writeCache(cache)), null) : (entry.lastNotifiedVersion = latest, entry.lastNotifiedAt = now, cache[installed.npmName] = entry, writeCache(cache), `Penny plugin update available: installed ${installed.version}, latest ${latest}. Updating refreshes the memory skill and MCP tool catalog. Let the user know they can update the Penny plugin via their plugin marketplace (or reinstall ${installed.npmName}).`);
 }
 
 // plugins/mypenny-core/lib/host.ts
@@ -819,7 +819,7 @@ function parseHost(argv) {
 function codexToolLoadingNotice(host) {
   return host !== "codex" ? null : [
     "<mypenny_tooling>",
-    "Your MyPenny memory tools (penny_session_start, penny_read, penny_write,",
+    "Your Penny memory tools (penny_session_start, penny_read, penny_write,",
     "penny_edit, penny_delete) are MCP tools that Codex loads on demand. If they",
     "are not in your available tools right now, they are deferred \u2014 NOT",
     'unavailable. Use the `tool_search` tool (query "mypenny" or "memory") to',

@@ -1,7 +1,7 @@
 # @mypenny/claude
 
-Claude Code plugin shell for MyPenny memory. It bundles the MyPenny MCP
-server definition, the MyPenny skill, and hook config files; hook behavior
+Claude Code plugin shell for Penny memory. It bundles the Penny MCP
+server definition, the Penny skill, and hook config files; hook behavior
 lives in `@mypenny/core`.
 
 The bundled MCP server points at `https://app.mypenny.ai/mcp` — a literal
@@ -28,7 +28,7 @@ Refresh the `mypenny` marketplace/source, then reinstall
 ```
 
 After upgrading, restart Claude Code or open a fresh session so the bundled
-MyPenny skill and hooks reload.
+Penny skill and hooks reload.
 
 ## First-launch
 On first SessionStart the plugin prints an auth hint to stderr with the exact
@@ -40,7 +40,7 @@ Run that command, sign in, approve in your browser, and re-open the session.
 ## SharedSpace Scope
 
 The per-project subconscious block does not need configuration; Claude Code
-passes the current working directory and MyPenny derives
+passes the current working directory and Penny derives
 `subconscious:<projectKey>` from the repo.
 
 Do not set local SharedSpace or workspace id environment variables in Claude

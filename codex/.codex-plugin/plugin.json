@@ -1,16 +1,16 @@
 {
   "name": "mypenny-codex",
-  "version": "0.1.30",
-  "description": "MyPenny memory injection — your memory follows you into Codex.",
+  "version": "0.1.31",
+  "description": "Penny memory injection — your memory follows you into Codex.",
   "author": {
     "name": "HelperLabs"
   },
   "homepage": "https://app.mypenny.ai",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "MyPenny",
+    "displayName": "Penny",
     "shortDescription": "Your memory follows you into Codex.",
-    "longDescription": "MyPenny brings your memories and notes into Codex, so you do not have to start over.",
+    "longDescription": "Penny brings your memories and notes into Codex, so you do not have to start over.",
     "developerName": "HelperLabs",
     "category": "Productivity",
     "capabilities": [

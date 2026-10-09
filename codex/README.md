@@ -1,7 +1,7 @@
 # @mypenny/codex
 
-Codex plugin shell for MyPenny memory. It installs the MyPenny MCP server
-definition, MyPenny skill, and lifecycle hooks; hook behavior lives in
+Codex plugin shell for Penny memory. It installs the Penny MCP server
+definition, Penny skill, and lifecycle hooks; hook behavior lives in
 `@mypenny/core`.
 Codex exposes the installed plugin directory through `CODEX_PLUGIN_ROOT`.
 
@@ -13,13 +13,13 @@ instead of editing the installed plugin, which the next update would overwrite.
 
 ## Relationship To The ChatGPT App
 
-The ChatGPT App and Codex plugin share the MyPenny MCP server, but they do not
+The ChatGPT App and Codex plugin share the Penny MCP server, but they do not
 provide the same behavior guarantees.
 
 - ChatGPT App V1 uses MCP instructions, tool descriptions, listing copy, and
   the ChatGPT Memory Setup widget.
 - Codex uses this plugin for a stronger lane: bundled MCP configuration, the
-  MyPenny skill, and lifecycle hooks.
+  Penny skill, and lifecycle hooks.
 - Installing the ChatGPT App does not automatically make this Codex plugin
   active, and installing this Codex plugin does not automatically install the
   ChatGPT App.
@@ -52,7 +52,7 @@ start a new thread.
 ## SharedSpace Scope
 
 The per-project subconscious block does not need configuration; Codex passes the
-current working directory and MyPenny derives `subconscious:<projectKey>` from
+current working directory and Penny derives `subconscious:<projectKey>` from
 the repo.
 
 Do not set local SharedSpace or workspace id environment variables in Codex.
