@@ -1,7 +1,33 @@
 
 // plugins/mypenny-core/scripts/auth_login.ts
 import * as os2 from "node:os";
+
+// plugins/mypenny-core/lib/open-browser.ts
 import { spawn } from "node:child_process";
+function openBrowser(url, deps = {}) {
+  let platform = deps.platform ?? process.platform, launch = deps.spawn ?? spawn, href;
+  try {
+    let parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return;
+    href = parsed.href;
+  } catch {
+    return;
+  }
+  let [cmd, args] = platform === "darwin" ? ["open", [href]] : platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", href]] : ["xdg-open", [href]];
+  try {
+    launch(cmd, args, {
+      detached: !0,
+      stdio: "ignore",
+      ...platform === "win32" ? { windowsHide: !0 } : {}
+    }).on("error", (err) => {
+      process.stderr.write(
+        `[mypenny] could not open a browser (${err.code ?? "error"}); use the Visit link above.
+`
+      );
+    }).unref();
+  } catch {
+  }
+}
 
 // plugins/mypenny-core/lib/auth-store.ts
 import * as fs2 from "node:fs";
@@ -106,16 +132,22 @@ async function requestDeviceCode(baseUrl, clientName, deps = {}) {
   if (!response.ok) {
     let error = "";
     try {
-      let body = await response.json();
-      error = typeof body?.error == "string" ? `: ${body.error}` : "";
+      let body2 = await response.json();
+      error = typeof body2?.error == "string" ? `: ${body2.error}` : "";
     } catch {
     }
     throw new Error(`device-code request failed (HTTP ${response.status})${error}`);
   }
-  return {
-    response: await response.json(),
-    clientContext
-  };
+  let body = await response.json();
+  return { response: assertDeviceCodeResponse(body), clientContext };
+}
+function assertDeviceCodeResponse(body) {
+  let record = body !== null && typeof body == "object" ? body : {}, bad = [];
+  if (["device_code", "user_code", "verification_uri", "verification_uri_complete"].forEach((key) => {
+    (typeof record[key] != "string" || record[key] === "") && bad.push(key);
+  }), (typeof record.expires_in != "number" || !Number.isFinite(record.expires_in)) && bad.push("expires_in"), record.interval !== void 0 && typeof record.interval != "number" && bad.push("interval"), bad.length > 0)
+    throw new Error(`device-code response missing or malformed: ${bad.join(", ")}`);
+  return record;
 }
 async function pollForToken(baseUrl, authorization, deps = {}) {
   let sleep = deps.sleep ?? defaultSleep, deadline = Date.now() + authorization.response.expires_in * 1e3, intervalSeconds = authorization.response.interval;
@@ -161,13 +193,6 @@ async function pollForToken(baseUrl, authorization, deps = {}) {
 
 // plugins/mypenny-core/scripts/auth_login.ts
 var BASE_URL = process.env.MYPENNY_BASE_URL ?? buildBaseUrl(), CLIENT_NAME = process.env.MYPENNY_CLIENT_NAME ?? os2.hostname();
-function openBrowser(url) {
-  let cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-  try {
-    spawn(cmd, [url], { detached: !0, stdio: "ignore" }).unref();
-  } catch {
-  }
-}
 async function main() {
   process.stderr.write(`[mypenny] requesting device code from ${BASE_URL} ...
 `);

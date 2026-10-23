@@ -464,18 +464,30 @@ import * as fs7 from "node:fs";
 import * as path5 from "node:path";
 import * as crypto5 from "node:crypto";
 var GUIDANCE_TTL_MS = 600 * 1e3;
+function tokenTag(token) {
+  return crypto5.createHash("sha256").update(token).digest("hex").slice(0, 16);
+}
 function cacheFile(projectKey) {
   let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto5.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
   return path5.join(guidanceDir(), `${safe}.${digest}.json`);
 }
-function readGuidanceCache(projectKey) {
+function readGuidanceCache(projectKey, expectedTokenTag) {
+  if (expectedTokenTag === null) return null;
   try {
     let parsed = JSON.parse(fs7.readFileSync(cacheFile(projectKey), "utf-8"));
-    if (typeof parsed?.fetchedAt != "number" || parsed.bundle === null || typeof parsed.bundle != "object")
+    if (typeof parsed?.fetchedAt != "number" || parsed.bundle === null || typeof parsed.bundle != "object" || expectedTokenTag !== void 0 && parsed.tokenTag !== expectedTokenTag)
       return null;
-    let b = parsed.bundle, preUpgrade = typeof b.memoryPolicy != "string" || typeof b.persona != "string" || typeof b.preferences != "string" || typeof b.contract != "string", str = (v) => typeof v == "string" ? v : "";
+    let b = parsed.bundle, incomplete = [
+      b.userFacts,
+      b.subconscious,
+      b.codingGuidance,
+      b.memoryPolicy,
+      b.persona,
+      b.preferences,
+      b.contract
+    ].some((value) => typeof value != "string"), str = (v) => typeof v == "string" ? v : "";
     return {
-      fetchedAt: preUpgrade ? Number.NEGATIVE_INFINITY : parsed.fetchedAt,
+      fetchedAt: incomplete ? Number.NEGATIVE_INFINITY : parsed.fetchedAt,
       bundle: {
         userFacts: str(b.userFacts),
         subconscious: str(b.subconscious),
@@ -484,8 +496,11 @@ function readGuidanceCache(projectKey) {
         persona: str(b.persona),
         preferences: str(b.preferences),
         contract: str(b.contract),
-        projectKey: typeof b.projectKey == "string" ? b.projectKey : projectKey
-      }
+        projectKey: typeof b.projectKey == "string" ? b.projectKey : projectKey,
+        // A missing revision alone is compatible with an older full response.
+        ...!incomplete && typeof b.revision == "string" ? { revision: b.revision } : {}
+      },
+      ...typeof parsed.tokenTag == "string" ? { tokenTag: parsed.tokenTag } : {}
     };
   } catch {
     return null;
@@ -599,7 +614,7 @@ function debugEnabled() {
 function debugLog2(message) {
   debugEnabled() && console.error(message);
 }
-async function callTool(name, args, timeoutMs = TIMEOUT_MS) {
+async function callTool(name, args, timeoutMs = TIMEOUT_MS, onCredential) {
   let token = readToken(), cfg = readConfig();
   return !token || !cfg ? (recordDiag({
     event: "memory_tool",
@@ -607,7 +622,7 @@ async function callTool(name, args, timeoutMs = TIMEOUT_MS) {
     tool: name,
     reason: token ? "no_config" : "no_auth"
   }), null) : withTokenRotation(
-    (bearer) => callToolOnce(name, args, bearer, cfg.memoryUrl, timeoutMs),
+    (bearer) => (onCredential?.(tokenTag(bearer)), callToolOnce(name, args, bearer, cfg.memoryUrl, timeoutMs)),
     token,
     timeoutMs
   );
@@ -643,7 +658,7 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
       tool: name,
       reason: "jsonrpc",
       status: data.error.code
-    }), { unauthorized: !1, value: null }) : {
+    }), { unauthorized: !1, value: null }) : data.result?.isError === !0 ? (recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason: "tool_error" }), { unauthorized: !1, value: null }) : {
       unauthorized: !1,
       value: data.result?.content?.find((c) => c.type === "text")?.text ?? null
     };
@@ -673,8 +688,12 @@ async function searchMemories(query, limit = 5, timeoutMs) {
     return recordDiag({ event: "memory_tool", outcome: "fail", tool: "penny_search_notes", reason: "parse" }), [];
   }
 }
+function currentTokenTag() {
+  let token = readToken();
+  return token ? tokenTag(token) : null;
+}
 function getCachedGuidanceForCwd(cwd) {
-  let projectKey = deriveProjectKey(cwd), cached = readGuidanceCache(projectKey), refreshStarted = isGuidanceStale(cached) ? spawnGuidanceRefresh(projectKey, cwd) : !1;
+  let projectKey = deriveProjectKey(cwd), cached = readGuidanceCache(projectKey, currentTokenTag()), refreshStarted = isGuidanceStale(cached) ? spawnGuidanceRefresh(projectKey, cwd) : !1;
   return {
     guidance: cached?.bundle ?? emptyGuidance(projectKey),
     cacheHit: cached !== null,
@@ -752,7 +771,9 @@ function shouldSearch(prompt) {
   return !0;
 }
 async function main() {
-  if (process.env.MYPENNY_SUBCONSCIOUS === "off" || !readToken()) return;
+  if (process.env.MYPENNY_SUBCONSCIOUS === "off") return;
+  let credential = readToken();
+  if (!credential) return;
   let disarm = armWatchdog(WATCHDOG_MS), raw = await readHookInput(), hookInput = normalizeHookInput(raw);
   if (!hookInput) return;
   setDiagContext({ hook: "user_prompt_submit", sessionId: hookInput.session_id });
@@ -760,7 +781,12 @@ async function main() {
   debug("Prompt(scrubbed,80):", scrubCredentials(prompt.slice(0, 80)));
   let state = readState(hookInput.session_id), cwd = hookInput.cwd ?? state?.projectPath ?? process.cwd(), { guidance, refreshStarted } = getCachedGuidanceForCwd(cwd);
   refreshStarted && debug("stale cache \u2014 refresh spawned");
-  let memories = shouldSearch(prompt) ? await searchMemories(prompt, 5, SEARCH_TIMEOUT_MS) : [], joined = joinBundle(guidance), currentHash = joined ? hashContent(joined) : null, effectiveGuidance = !state || state.guidanceHash !== currentHash ? guidance : emptyGuidance(guidance.projectKey);
+  let memories = shouldSearch(prompt) ? await searchMemories(prompt, 5, SEARCH_TIMEOUT_MS) : [];
+  if (readToken() !== credential) {
+    disarm();
+    return;
+  }
+  let joined = joinBundle(guidance), currentHash = joined ? hashContent(joined) : null, effectiveGuidance = !state || state.guidanceHash !== currentHash ? guidance : emptyGuidance(guidance.projectKey);
   disarm();
   let output = formatInjection(effectiveGuidance, memories);
   output && console.log(output), state && currentHash !== null && currentHash !== state.guidanceHash && writeState({ ...state, guidanceHash: currentHash });

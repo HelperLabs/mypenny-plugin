@@ -253,18 +253,30 @@ import * as fs5 from "node:fs";
 import * as path4 from "node:path";
 import * as crypto3 from "node:crypto";
 var GUIDANCE_TTL_MS = 600 * 1e3;
+function tokenTag(token) {
+  return crypto3.createHash("sha256").update(token).digest("hex").slice(0, 16);
+}
 function cacheFile(projectKey) {
   let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto3.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
   return path4.join(guidanceDir(), `${safe}.${digest}.json`);
 }
-function readGuidanceCache(projectKey) {
+function readGuidanceCache(projectKey, expectedTokenTag) {
+  if (expectedTokenTag === null) return null;
   try {
     let parsed = JSON.parse(fs5.readFileSync(cacheFile(projectKey), "utf-8"));
-    if (typeof parsed?.fetchedAt != "number" || parsed.bundle === null || typeof parsed.bundle != "object")
+    if (typeof parsed?.fetchedAt != "number" || parsed.bundle === null || typeof parsed.bundle != "object" || expectedTokenTag !== void 0 && parsed.tokenTag !== expectedTokenTag)
       return null;
-    let b = parsed.bundle, preUpgrade = typeof b.memoryPolicy != "string" || typeof b.persona != "string" || typeof b.preferences != "string" || typeof b.contract != "string", str = (v) => typeof v == "string" ? v : "";
+    let b = parsed.bundle, incomplete = [
+      b.userFacts,
+      b.subconscious,
+      b.codingGuidance,
+      b.memoryPolicy,
+      b.persona,
+      b.preferences,
+      b.contract
+    ].some((value) => typeof value != "string"), str = (v) => typeof v == "string" ? v : "";
     return {
-      fetchedAt: preUpgrade ? Number.NEGATIVE_INFINITY : parsed.fetchedAt,
+      fetchedAt: incomplete ? Number.NEGATIVE_INFINITY : parsed.fetchedAt,
       bundle: {
         userFacts: str(b.userFacts),
         subconscious: str(b.subconscious),
@@ -273,8 +285,11 @@ function readGuidanceCache(projectKey) {
         persona: str(b.persona),
         preferences: str(b.preferences),
         contract: str(b.contract),
-        projectKey: typeof b.projectKey == "string" ? b.projectKey : projectKey
-      }
+        projectKey: typeof b.projectKey == "string" ? b.projectKey : projectKey,
+        // A missing revision alone is compatible with an older full response.
+        ...!incomplete && typeof b.revision == "string" ? { revision: b.revision } : {}
+      },
+      ...typeof parsed.tokenTag == "string" ? { tokenTag: parsed.tokenTag } : {}
     };
   } catch {
     return null;
@@ -367,8 +382,12 @@ ${inner}</mypenny_subconscious_update>`;
 }
 
 // plugins/mypenny-core/lib/memory-client.ts
+function currentTokenTag() {
+  let token = readToken();
+  return token ? tokenTag(token) : null;
+}
 function getCachedGuidanceForCwd(cwd) {
-  let projectKey = deriveProjectKey(cwd), cached = readGuidanceCache(projectKey), refreshStarted = isGuidanceStale(cached) ? spawnGuidanceRefresh(projectKey, cwd) : !1;
+  let projectKey = deriveProjectKey(cwd), cached = readGuidanceCache(projectKey, currentTokenTag()), refreshStarted = isGuidanceStale(cached) ? spawnGuidanceRefresh(projectKey, cwd) : !1;
   return {
     guidance: cached?.bundle ?? emptyGuidance(projectKey),
     cacheHit: cached !== null,

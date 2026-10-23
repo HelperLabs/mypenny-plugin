@@ -352,15 +352,57 @@ import * as fs5 from "node:fs";
 import * as path4 from "node:path";
 import * as crypto4 from "node:crypto";
 var GUIDANCE_TTL_MS = 600 * 1e3;
+function tokenTag(token) {
+  return crypto4.createHash("sha256").update(token).digest("hex").slice(0, 16);
+}
 function cacheFile(projectKey) {
   let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto4.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
   return path4.join(guidanceDir(), `${safe}.${digest}.json`);
 }
-function writeGuidanceCache(projectKey, bundle, now = Date.now()) {
+function readGuidanceCache(projectKey, expectedTokenTag) {
+  if (expectedTokenTag === null) return null;
+  try {
+    let parsed = JSON.parse(fs5.readFileSync(cacheFile(projectKey), "utf-8"));
+    if (typeof parsed?.fetchedAt != "number" || parsed.bundle === null || typeof parsed.bundle != "object" || expectedTokenTag !== void 0 && parsed.tokenTag !== expectedTokenTag)
+      return null;
+    let b = parsed.bundle, incomplete = [
+      b.userFacts,
+      b.subconscious,
+      b.codingGuidance,
+      b.memoryPolicy,
+      b.persona,
+      b.preferences,
+      b.contract
+    ].some((value) => typeof value != "string"), str = (v) => typeof v == "string" ? v : "";
+    return {
+      fetchedAt: incomplete ? Number.NEGATIVE_INFINITY : parsed.fetchedAt,
+      bundle: {
+        userFacts: str(b.userFacts),
+        subconscious: str(b.subconscious),
+        codingGuidance: str(b.codingGuidance),
+        memoryPolicy: str(b.memoryPolicy),
+        persona: str(b.persona),
+        preferences: str(b.preferences),
+        contract: str(b.contract),
+        projectKey: typeof b.projectKey == "string" ? b.projectKey : projectKey,
+        // A missing revision alone is compatible with an older full response.
+        ...!incomplete && typeof b.revision == "string" ? { revision: b.revision } : {}
+      },
+      ...typeof parsed.tokenTag == "string" ? { tokenTag: parsed.tokenTag } : {}
+    };
+  } catch {
+    return null;
+  }
+}
+function writeGuidanceCache(projectKey, bundle, now = Date.now(), fetchedWithTokenTag) {
   try {
     fs5.mkdirSync(guidanceDir(), { recursive: !0 });
-    let target = cacheFile(projectKey), tmp = `${target}.${crypto4.randomUUID()}.tmp`;
-    fs5.writeFileSync(tmp, JSON.stringify({ bundle, fetchedAt: now }, null, 2), { mode: 384 });
+    let target = cacheFile(projectKey), tmp = `${target}.${crypto4.randomUUID()}.tmp`, payload = {
+      bundle,
+      fetchedAt: now,
+      ...fetchedWithTokenTag ? { tokenTag: fetchedWithTokenTag } : {}
+    };
+    fs5.writeFileSync(tmp, JSON.stringify(payload, null, 2), { mode: 384 });
     try {
       fs5.renameSync(tmp, target), process.platform !== "win32" && fs5.chmodSync(target, 384);
     } catch (err) {
@@ -402,6 +444,20 @@ function recordDiag(record) {
     }
 }
 
+// plugins/mypenny-core/lib/format.ts
+function emptyGuidance(projectKey) {
+  return {
+    userFacts: "",
+    subconscious: "",
+    codingGuidance: "",
+    memoryPolicy: "",
+    persona: "",
+    preferences: "",
+    contract: "",
+    projectKey
+  };
+}
+
 // plugins/mypenny-core/lib/memory-client.ts
 var TIMEOUT_MS = 6e3, GUIDANCE_BLOCK_NAMES = [
   "user_facts",
@@ -417,7 +473,7 @@ function debugEnabled() {
 function debugLog2(message) {
   debugEnabled() && console.error(message);
 }
-async function callTool(name, args, timeoutMs = TIMEOUT_MS) {
+async function callTool(name, args, timeoutMs = TIMEOUT_MS, onCredential) {
   let token = readToken(), cfg = readConfig();
   return !token || !cfg ? (recordDiag({
     event: "memory_tool",
@@ -425,7 +481,7 @@ async function callTool(name, args, timeoutMs = TIMEOUT_MS) {
     tool: name,
     reason: token ? "no_config" : "no_auth"
   }), null) : withTokenRotation(
-    (bearer) => callToolOnce(name, args, bearer, cfg.memoryUrl, timeoutMs),
+    (bearer) => (onCredential?.(tokenTag(bearer)), callToolOnce(name, args, bearer, cfg.memoryUrl, timeoutMs)),
     token,
     timeoutMs
   );
@@ -461,7 +517,7 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
       tool: name,
       reason: "jsonrpc",
       status: data.error.code
-    }), { unauthorized: !1, value: null }) : {
+    }), { unauthorized: !1, value: null }) : data.result?.isError === !0 ? (recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason: "tool_error" }), { unauthorized: !1, value: null }) : {
       unauthorized: !1,
       value: data.result?.content?.find((c) => c.type === "text")?.text ?? null
     };
@@ -472,32 +528,56 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
     ), recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason }), { unauthorized: !1, value: null };
   }
 }
-async function fetchCoreMemoryBlocks(projectKey, timeoutMs) {
+async function fetchCoreMemoryBlocks(projectKey, timeoutMs, ifRevision, onCredential) {
   let raw = await callTool(
     "penny_get_profile",
     {
       projectKey,
-      blockNames: [...GUIDANCE_BLOCK_NAMES, `subconscious:${projectKey}`]
+      blockNames: [...GUIDANCE_BLOCK_NAMES, `subconscious:${projectKey}`],
+      ...ifRevision !== void 0 ? { ifRevision } : {}
     },
-    timeoutMs
+    timeoutMs,
+    onCredential
   );
-  if (raw === null) return { blocks: [], contract: "", ok: !1 };
+  if (raw === null) return { blocks: [], contract: "", ok: !1, unchanged: !1 };
   try {
-    let parsed = JSON.parse(raw), byName = /* @__PURE__ */ new Map();
+    let parsed = JSON.parse(raw);
+    if (Object.hasOwn(parsed, "unchanged"))
+      return parsed.unchanged !== !0 || ifRevision === void 0 || typeof parsed.revision != "string" || parsed.revision !== ifRevision ? { blocks: [], contract: "", ok: !1, unchanged: !1 } : { blocks: [], contract: "", ok: !0, unchanged: !0, revision: parsed.revision };
+    let byName = /* @__PURE__ */ new Map();
     for (let group of [parsed.global, parsed.workspace])
       if (Array.isArray(group))
         for (let b of group)
           typeof b?.blockName == "string" && byName.set(b.blockName, { blockName: b.blockName, content: b.content || "" });
-    let contract = typeof parsed.contract == "string" ? parsed.contract : "";
-    return { blocks: [...byName.values()], contract, ok: !0 };
+    let contract = typeof parsed.contract == "string" ? parsed.contract : "", revision = typeof parsed.revision == "string" ? parsed.revision : void 0;
+    return { blocks: [...byName.values()], contract, ok: !0, unchanged: !1, revision };
   } catch {
-    return recordDiag({ event: "memory_tool", outcome: "fail", tool: "penny_get_profile", reason: "parse" }), { blocks: [], contract: "", ok: !1 };
+    return recordDiag({ event: "memory_tool", outcome: "fail", tool: "penny_get_profile", reason: "parse" }), { blocks: [], contract: "", ok: !1, unchanged: !1 };
   }
 }
-async function fetchGuidance(cwd, timeoutMs) {
-  let projectKey = deriveProjectKey(cwd), { blocks, contract, ok } = await fetchCoreMemoryBlocks(projectKey, timeoutMs), block = (name) => blocks.find((b) => b.blockName === name)?.content ?? "";
+async function fetchGuidance(cwd, timeoutMs, ifRevision) {
+  let projectKey = deriveProjectKey(cwd), fetchedWith, { blocks, contract, ok, unchanged, revision } = await fetchCoreMemoryBlocks(
+    projectKey,
+    timeoutMs,
+    ifRevision,
+    (tag) => {
+      fetchedWith = tag;
+    }
+  );
+  if (!fetchedWith || fetchedWith !== currentTokenTag())
+    return { guidance: emptyGuidance(projectKey), ok: !1, unchanged: !1, tokenTag: fetchedWith };
+  if (unchanged)
+    return {
+      ok,
+      unchanged: !0,
+      tokenTag: fetchedWith,
+      guidance: { ...emptyGuidance(projectKey), revision }
+    };
+  let block = (name) => blocks.find((b) => b.blockName === name)?.content ?? "";
   return {
     ok,
+    unchanged: !1,
+    tokenTag: fetchedWith,
     guidance: {
       userFacts: block("user_facts"),
       subconscious: block(`subconscious:${projectKey}`),
@@ -509,9 +589,22 @@ async function fetchGuidance(cwd, timeoutMs) {
       persona: block("persona"),
       preferences: block("preferences"),
       contract,
-      projectKey
+      projectKey,
+      revision
     }
   };
+}
+async function refreshAndCache(cwd, timeoutMs) {
+  let cached = readGuidanceCache(deriveProjectKey(cwd), currentTokenTag()), { guidance, ok, unchanged, tokenTag: fetchedWith } = await fetchGuidance(
+    cwd,
+    timeoutMs,
+    cached?.bundle.revision
+  );
+  return !ok || !fetchedWith || fetchedWith !== currentTokenTag() ? { guidance: emptyGuidance(deriveProjectKey(cwd)), ok: !1, unchanged: !1 } : unchanged ? cached ? (writeGuidanceCache(cached.bundle.projectKey, cached.bundle, Date.now(), fetchedWith), { guidance: cached.bundle, ok: !0, unchanged: !0 }) : { guidance, ok: !1, unchanged: !1 } : (ok && writeGuidanceCache(guidance.projectKey, guidance, Date.now(), fetchedWith), { guidance, ok, unchanged: !1 });
+}
+function currentTokenTag() {
+  let token = readToken();
+  return token ? tokenTag(token) : null;
 }
 
 // plugins/mypenny-core/lib/watchdog.ts
@@ -536,12 +629,16 @@ async function main() {
     return;
   }
   setDiagContext({ hook: "refresh_guidance" }), armWatchdog(WATCHDOG_MS);
-  let projectKey = deriveProjectKey(cwd), { guidance, ok } = await fetchGuidance(cwd);
+  let projectKey = deriveProjectKey(cwd), { guidance, ok, unchanged } = await refreshAndCache(cwd);
   if (!ok) {
     debug(`fetch failed for project=${projectKey}; leaving cache untouched`);
     return;
   }
-  writeGuidanceCache(projectKey, guidance), debug(
+  if (unchanged) {
+    debug(`unchanged for project=${projectKey}; restamped cached bundle`);
+    return;
+  }
+  debug(
     `cached project=${projectKey} user=${guidance.userFacts.length}b sub=${guidance.subconscious.length}b coding=${guidance.codingGuidance.length}b`
   );
 }

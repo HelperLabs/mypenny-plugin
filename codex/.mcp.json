@@ -2,7 +2,7 @@
   "mcpServers": {
     "MyPenny": {
       "type": "http",
-      "url": "https://app.mypenny.ai/mcp"
+      "url": "https://app.mypenny.ai/mcp/codex"
     }
   }
 }

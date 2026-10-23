@@ -17,6 +17,16 @@ user's timezone so those dates are right.
 - **Read** with `penny_read` (`target: "tasks"`): filter by bucket (today/upcoming/anytime/
   someday), project, area, tags, status, or owner; pass `taskId` for one task's
   full detail. Use this for "what's on my plate?" or "what's due?".
+- **Read every match** when the answer depends on the whole list: a review, or
+  checking that a new to-do isn't already there. Filters combine, and a list
+  returns up to `limit` tasks (100 by default), fewer when the page would pass
+  about 40,000 characters. When more may match, the reply carries `nextCursor`:
+  repeat the same call with `cursor` set to it until a reply comes back
+  without one. A page can be short and still carry a cursor, so never stop at
+  a short page. A task whose status changed while you paged can appear twice,
+  so go by `_id`. A task you reopen while paging may be missed; read again
+  after bulk status changes. Pass `view: "compact"` when you don't need notes;
+  it leaves them out, and they are most of a full page.
 - **Read the structure** with `penny_read` (`target: "tasks"`, `organize`:
   `"area"`|`"project"`|`"heading"`): enumerate areas, projects, or headings to
   navigate the full tree. The digest is capped and omits headings, so reach

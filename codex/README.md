@@ -5,11 +5,13 @@ definition, Penny skill, and lifecycle hooks; hook behavior lives in
 `@mypenny/core`.
 Codex exposes the installed plugin directory through `CODEX_PLUGIN_ROOT`.
 
-The bundled MCP server URL is a literal in `.mcp.json` with **no environment
-override** — `${VAR}` templating there breaks installation on some hosts (#814),
-so the endpoint is resolved when the plugin is built, not when it is run. To
-point Codex at another engine, add your own MCP server to `~/.codex/config.toml`
-instead of editing the installed plugin, which the next update would overwrite.
+The bundled MCP server URL is `https://app.mypenny.ai/mcp/codex`, a literal in
+`.mcp.json` with **no environment override** — `${VAR}` templating there breaks
+installation on some hosts (#814). The host is resolved when the plugin is built
+(each distribution channel swaps in its own base) and the `/codex` path is this
+shell's own. To point Codex at another engine, add your own MCP server to
+`~/.codex/config.toml` instead of editing the installed plugin, which the next
+update would overwrite.
 
 ## Relationship To The ChatGPT App
 
@@ -36,6 +38,15 @@ codex
 /plugins
 ```
 
+The bundled MCP server needs its own sign-in once:
+
+```
+codex mcp login MyPenny
+```
+
+That sign-in is separate from the hooks' device-flow token (`~/.mypenny/token`):
+the Penny tools in chat use the MCP sign-in, the hooks use the token.
+
 ## Upgrade
 
 Refresh the marketplace source, then restart Codex so the bundled skill, MCP
@@ -48,6 +59,15 @@ codex plugin marketplace upgrade HelperLabs/mypenny-plugin
 If Codex still shows the old plugin version, open `/plugins`, uninstall
 `mypenny-codex`, install it again from the refreshed marketplace, and
 start a new thread.
+
+If you installed Penny before 0.1.32, sign in once after upgrading:
+
+```
+codex mcp login MyPenny
+```
+
+Codex keys OAuth credentials by server URL. Version 0.1.32 moves the Penny
+connection to `/mcp/codex`, so credentials stored for `/mcp` do not carry over.
 
 ## SharedSpace Scope
 

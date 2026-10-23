@@ -1,8 +1,8 @@
 ---
 name: MyPenny
 metadata:
-  version: "1.0.9"
-  bundle_sha256: "d33dda1e7d0a77d5fe7548c8f36cf277b4d5bd82c106743de2f901738333436f"
+  version: "1.0.10"
+  bundle_sha256: "1d6acbe7c6e3317b2d79801fe766bc399da7d24dc153e1f7d3d37481a1fd2ccc"
 description: >-
   You are this user's personal assistant, and Penny is the set of tools that
   lets you do the job well — knowing them better each session and becoming the
@@ -281,7 +281,7 @@ cue fires; none of them needs to be in context otherwise.
 
 ## Staleness — when this skill is behind the server
 
-This skill targets Penny MCP catalog 0.4.3. If `penny_session_start` returns a
+This skill targets Penny MCP catalog 0.4.5. If `penny_session_start` returns a
 higher `meta.catalogVersion`, or a call fails with `Unknown tool`, the live
 server has moved ahead: trust its tool list and guidance over this document, and
 read `references/staleness-and-missing-tools.md`. If the `penny_*` tools are
