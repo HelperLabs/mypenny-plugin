@@ -36,6 +36,10 @@ function normalizeHookInput(input) {
   let out = {};
   for (let [k, v] of Object.entries(input))
     ALLOWED_KEYS.has(k) && (out[k] = v);
+  if (!out.cwd) {
+    let roots = input.workspace_roots;
+    Array.isArray(roots) && typeof roots[0] == "string" && roots[0] && (out.cwd = roots[0]);
+  }
   return out;
 }
 
@@ -117,7 +121,7 @@ function recordDiag(record) {
 import * as fs2 from "node:fs";
 import * as path3 from "node:path";
 import * as crypto from "node:crypto";
-var STALE_THRESHOLD_MS = 10080 * 60 * 1e3, CLEANUP_INTERVAL_MS = 1440 * 60 * 1e3;
+var STALE_THRESHOLD_MS = 10080 * 60 * 1e3, OFF_RECORD_THRESHOLD_MS = 2160 * 60 * 60 * 1e3, CLEANUP_INTERVAL_MS = 1440 * 60 * 1e3;
 function ensureSessionsDir() {
   fs2.mkdirSync(sessionsDir(), { recursive: !0 });
 }
@@ -177,11 +181,15 @@ function cleanupStaleSessions() {
     if (Date.now() - lastCleanup < CLEANUP_INTERVAL_MS || (fs2.mkdirSync(path3.dirname(cleanupMarkerPath()), { recursive: !0 }), fs2.writeFileSync(cleanupMarkerPath(), String(Date.now())), !fs2.existsSync(sessionsDir()))) return;
     let files = fs2.readdirSync(sessionsDir()), now = Date.now();
     for (let file of files) {
-      if (!file.endsWith(".json")) continue;
       let filePath = path3.join(sessionsDir(), file);
       try {
-        let stat = fs2.statSync(filePath);
-        now - stat.mtimeMs > STALE_THRESHOLD_MS && fs2.unlinkSync(filePath);
+        if (file.endsWith(".posture")) {
+          now - fs2.statSync(filePath).mtimeMs > STALE_THRESHOLD_MS && fs2.rmSync(filePath, { recursive: !0, force: !0 });
+          continue;
+        }
+        if (!file.endsWith(".json") && !file.endsWith(".mod") && !file.endsWith(".profile.txt")) continue;
+        let threshold = file.endsWith(".offrecord.json") ? OFF_RECORD_THRESHOLD_MS : STALE_THRESHOLD_MS;
+        now - fs2.statSync(filePath).mtimeMs > threshold && fs2.unlinkSync(filePath);
       } catch {
       }
     }
@@ -324,22 +332,37 @@ function readEnvConfig() {
 }
 
 // plugins/mypenny-core/lib/project-key.ts
+import * as crypto4 from "node:crypto";
 import * as fs5 from "node:fs";
 import * as path4 from "node:path";
 function deriveProjectKey(cwd) {
+  return deriveProjectKeys(cwd).projectKey;
+}
+var READABLE_KEY_MAX = 200;
+function deriveProjectKeys(cwd) {
+  let identity = deriveIdentity(cwd);
+  if (!identity.hostAndPath) return { projectKey: identity.key };
+  let readable = sanitizeKey(identity.path), capped = readable.length > READABLE_KEY_MAX ? readable.slice(0, READABLE_KEY_MAX).replace(/-+$/, "") : readable, projectKey = `${capped}-${repositoryHash(identity.path)}`;
+  return capped === readable && readable !== "unknown" ? { projectKey, legacyProjectKey: readable } : { projectKey };
+}
+function deriveIdentity(cwd) {
   try {
     let gitRoot = findGitRoot(cwd);
     if (gitRoot) {
       let configPath2 = resolveGitConfigPath(gitRoot);
       if (configPath2 && fs5.existsSync(configPath2)) {
-        let remote = parseOriginRemote(fs5.readFileSync(configPath2, "utf-8"));
-        if (remote) return sanitizeKey(remote);
+        let url = parseOriginUrl(fs5.readFileSync(configPath2, "utf-8"));
+        if (url) {
+          let repo = extractRepoPath(url);
+          if (repo?.hostAndPath) return { hostAndPath: !0, path: repo.path };
+          if (repo) return { hostAndPath: !1, key: sanitizeKey(repo.path) };
+        }
       }
-      return sanitizeKey(path4.basename(gitRoot));
+      return { hostAndPath: !1, key: sanitizeKey(path4.basename(gitRoot)) };
     }
   } catch {
   }
-  return sanitizeKey(path4.basename(cwd));
+  return { hostAndPath: !1, key: sanitizeKey(path4.basename(cwd)) };
 }
 function findGitRoot(start) {
   let dir = start;
@@ -376,7 +399,7 @@ function resolveGitConfigPath(gitRoot) {
   }
   return null;
 }
-function parseOriginRemote(configText) {
+function parseOriginUrl(configText) {
   let lines = configText.split(`
 `), inOrigin = !1;
   for (let line of lines) {
@@ -387,12 +410,62 @@ function parseOriginRemote(configText) {
     }
     if (!inOrigin) continue;
     let urlMatch = trimmed.match(/^url\s*=\s*(.+)$/);
-    if (urlMatch) return extractRepoName(urlMatch[1]);
+    if (urlMatch) return urlMatch[1];
   }
   return null;
 }
+function extractRepoPath(url) {
+  let cleaned = url.trim().replace(/[/\\]+$/, "");
+  if (!cleaned) return null;
+  if (/^[a-z]:[\\/]/i.test(cleaned)) return basenameOf(cleaned);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(cleaned))
+    try {
+      let parsed = new URL(cleaned), host = parsed.hostname;
+      if (!host) return basenameOf(parsed.pathname);
+      let repoPath = normalizeRepoPath(parsed.pathname, !0);
+      return repoPath ? { path: `${host}/${repoPath}`, hostAndPath: !0 } : { path: host, hostAndPath: !1 };
+    } catch {
+      return null;
+    }
+  let scp = cleaned.match(/^(?:[^@\s/]+@)?([^:/\s]+):(.+)$/);
+  if (scp) {
+    let repoPath = normalizeRepoPath(scp[2], !1);
+    return repoPath ? { path: `${scp[1]}/${repoPath}`, hostAndPath: !0 } : null;
+  }
+  return basenameOf(cleaned);
+}
+function normalizeRepoPath(raw, percentEncoded) {
+  let segments = [];
+  for (let part of raw.split("/")) {
+    let segment = part;
+    if (percentEncoded)
+      try {
+        segment = decodeURIComponent(segment);
+      } catch {
+      }
+    if (segment = segment.normalize("NFC"), !(segment === "" || segment === ".")) {
+      if (segment === "..") {
+        segments.pop();
+        continue;
+      }
+      segments.push(segment);
+    }
+  }
+  if (segments.length > 0 && segments[segments.length - 1].toLowerCase() === ".git" && segments.pop(), segments.length > 0) {
+    let last = segments.length - 1;
+    segments[last] = segments[last].replace(/\.git$/i, ""), segments[last] === "" && segments.pop();
+  }
+  return segments.join("/");
+}
+function repositoryHash(hostAndPath) {
+  return crypto4.createHash("sha256").update(hostAndPath.toLowerCase()).digest("hex").slice(0, 8);
+}
+function basenameOf(location) {
+  let name = extractRepoName(location);
+  return name ? { path: name, hostAndPath: !1 } : null;
+}
 function extractRepoName(url) {
-  return url.trim().replace(/\.git$/, "").split(/[/:]/).pop() || null;
+  return url.trim().replace(/[/\\]+$/, "").replace(/\.git$/i, "").split(/[/:\\]/).pop() || null;
 }
 function sanitizeKey(raw) {
   return raw.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unknown";
@@ -401,10 +474,10 @@ function sanitizeKey(raw) {
 // plugins/mypenny-core/lib/claim.ts
 import * as fs6 from "node:fs";
 import * as path5 from "node:path";
-import * as crypto4 from "node:crypto";
+import * as crypto5 from "node:crypto";
 var KEEP_WINDOWS = 2;
 function claimStem(name) {
-  let safe = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "claim", digest = crypto4.createHash("sha256").update(name).digest("hex").slice(0, 8);
+  let safe = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "claim", digest = crypto5.createHash("sha256").update(name).digest("hex").slice(0, 8);
   return `${safe}.${digest}`;
 }
 function prune(dir, stem, currentWindow) {
@@ -511,13 +584,13 @@ async function withTokenRotation(attempt, token, timeoutMs) {
 // plugins/mypenny-core/lib/guidance-cache.ts
 import * as fs7 from "node:fs";
 import * as path6 from "node:path";
-import * as crypto5 from "node:crypto";
+import * as crypto6 from "node:crypto";
 var GUIDANCE_TTL_MS = 600 * 1e3;
 function tokenTag(token) {
-  return crypto5.createHash("sha256").update(token).digest("hex").slice(0, 16);
+  return crypto6.createHash("sha256").update(token).digest("hex").slice(0, 16);
 }
 function cacheFile(projectKey) {
-  let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto5.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
+  let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto6.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
   return path6.join(guidanceDir(), `${safe}.${digest}.json`);
 }
 function readGuidanceCache(projectKey, expectedTokenTag) {
@@ -533,7 +606,8 @@ function readGuidanceCache(projectKey, expectedTokenTag) {
       b.memoryPolicy,
       b.persona,
       b.preferences,
-      b.contract
+      b.contract,
+      b.actingTools
     ].some((value) => typeof value != "string"), str = (v) => typeof v == "string" ? v : "";
     return {
       fetchedAt: incomplete ? Number.NEGATIVE_INFINITY : parsed.fetchedAt,
@@ -545,6 +619,7 @@ function readGuidanceCache(projectKey, expectedTokenTag) {
         persona: str(b.persona),
         preferences: str(b.preferences),
         contract: str(b.contract),
+        actingTools: str(b.actingTools),
         projectKey: typeof b.projectKey == "string" ? b.projectKey : projectKey,
         // A missing revision alone is compatible with an older full response.
         ...!incomplete && typeof b.revision == "string" ? { revision: b.revision } : {}
@@ -558,7 +633,7 @@ function readGuidanceCache(projectKey, expectedTokenTag) {
 function writeGuidanceCache(projectKey, bundle, now = Date.now(), fetchedWithTokenTag) {
   try {
     fs7.mkdirSync(guidanceDir(), { recursive: !0 });
-    let target = cacheFile(projectKey), tmp = `${target}.${crypto5.randomUUID()}.tmp`, payload = {
+    let target = cacheFile(projectKey), tmp = `${target}.${crypto6.randomUUID()}.tmp`, payload = {
       bundle,
       fetchedAt: now,
       ...fetchedWithTokenTag ? { tokenTag: fetchedWithTokenTag } : {}
@@ -582,6 +657,46 @@ function isGuidanceStale(cached, now = Date.now(), ttlMs = GUIDANCE_TTL_MS) {
   return age < 0 ? !0 : age > ttlMs;
 }
 
+// plugins/mypenny-core/lib/posture.ts
+var ACTING_TOOLS_BLOCK = "acting_tools";
+var SAFE_SESSION_ID = /^[A-Za-z0-9._-]{1,200}$/;
+function nonEmpty(x) {
+  return typeof x == "string" && x.length > 0 ? x : null;
+}
+function hookSessionId(payload) {
+  let id = nonEmpty(payload.session_id) ?? nonEmpty(payload.conversation_id);
+  return id !== null && SAFE_SESSION_ID.test(id) ? id : null;
+}
+var LIST_LINE = /^(acting|reading)\s*:\s*(.+?)\s*$/i, BASH_PATTERN = /^Bash\((.*)\)$/, TOOL_GLOB = /^[A-Za-z0-9_*:.-]+$/;
+function parseActingToolsBlock(content) {
+  let out = { acting: [], reading: [], invalid: [] };
+  for (let rawLine of String(content).split(`
+`)) {
+    let line = rawLine.replace(/^\s*(?:[-*•]\s+)?/, "").trim();
+    if (line === "" || line.startsWith("#")) continue;
+    let m = LIST_LINE.exec(line), kind = m?.[1]?.toLowerCase(), pattern = m?.[2] ?? "", bash = BASH_PATTERN.exec(pattern);
+    if (!(m !== null && (bash ? kind === "acting" && bash[1].trim().length > 0 : TOOL_GLOB.test(pattern)))) {
+      out.invalid.push(line);
+      continue;
+    }
+    (kind === "acting" ? out.acting : out.reading).push(pattern);
+  }
+  return out;
+}
+function actingToolsNotice(content) {
+  let { invalid } = parseActingToolsBlock(content);
+  if (invalid.length === 0) return null;
+  let shown = invalid.slice(0, 3).map((l) => `"${l.length > 80 ? `${l.slice(0, 80)}\u2026` : l}"`), count = invalid.length === 1 ? "1 line" : `${invalid.length} lines`;
+  return [
+    "<mypenny_notice>",
+    `The user's ${ACTING_TOOLS_BLOCK} profile block has ${count} Penny can't use, so skill-run posture checks ignore them: ${shown.join(", ")}.`,
+    'Each line should be "acting: <tool>" or "reading: <tool>", where <tool> is a tool name (* allowed); an acting line can also be Bash(<command words>). Offer to fix them.',
+    "</mypenny_notice>"
+  ].join(`
+`);
+}
+var SILENT = Object.freeze({ kind: "silent" });
+
 // plugins/mypenny-core/lib/format.ts
 function emptyGuidance(projectKey) {
   return {
@@ -592,6 +707,7 @@ function emptyGuidance(projectKey) {
     persona: "",
     preferences: "",
     contract: "",
+    actingTools: "",
     projectKey
   };
 }
@@ -634,14 +750,52 @@ function formatInjection(guidance, memories) {
   }
   return out += "</mypenny_subconscious>", out;
 }
+var PART_ONE_LIMIT = 8500;
+function formatGuidanceParts(guidance, kind) {
+  let outer = kind === "start" ? "mypenny_subconscious" : "mypenny_subconscious_update", body = ["", "", ""], limit = (kind === "start" ? [PART_ONE_LIMIT, 9500, 9500] : [9500, 9500, 9500]).map((n) => n - 100), size = kind === "start" ? (s) => s.length : (s) => JSON.stringify(s).length - 2, fit = (text, room) => kind === "start" ? Math.min(text.length, room) : escapedPrefix(text, room), used = [0, 0, 0], part = 0;
+  for (let { tag, text } of blocks(guidance)) {
+    let close = tag.split(" ")[0], rest = text, continued = !1;
+    for (; rest.length > 0; ) {
+      let open = continued ? `${tag} continued="true"` : tag, wrap = size(`  <${open}>
+    
+  </${close}>
+`), whole = size(rest) + wrap;
+      part < 2 && used[part] > 0 && used[part] + whole > limit[part] && (whole <= limit[part + 1] || limit[part] - used[part] - wrap < 1e3) && part++;
+      let room = part === 2 ? 1 / 0 : limit[part] - used[part] - wrap, cut = whole - wrap <= room ? rest.length : splitAt(rest, fit(rest, room)), piece = `  <${open}>
+    ${rest.slice(0, cut)}
+  </${close}>
+`;
+      rest = rest.slice(cut), body[part] += piece, used[part] += size(piece), continued = !0;
+    }
+  }
+  return body.map((inner, index) => inner ? `<${outer} part="${index + 1} of 3">
+${inner}</${outer}>` : "");
+}
+function escapedPrefix(text, max) {
+  let total = 0;
+  for (let i = 0; i < text.length; i++)
+    if (total += JSON.stringify(text[i]).length - 2, total > max) return i;
+  return text.length;
+}
+function splitAt(text, max) {
+  if (text.length <= max) return text.length;
+  let line = text.lastIndexOf(`
+`, max), sentence = text.lastIndexOf(". ", max), space = text.lastIndexOf(" ", max), boundary = [line, sentence >= 0 ? sentence + 1 : -1, space].find((i) => i >= max / 2);
+  return boundary === void 0 ? max : boundary + 1;
+}
 
 // plugins/mypenny-core/lib/memory-client.ts
-var TIMEOUT_MS = 6e3, GUIDANCE_BLOCK_NAMES = [
+var TIMEOUT_MS = 6e3;
+var PROFILE_TOOL = "penny_read", GUIDANCE_BLOCK_NAMES = [
   "user_facts",
   "persona",
   "preferences",
   "coding_guidance",
-  "memory_policy"
+  "memory_policy",
+  // Not injected: the posture gate reads it from the cache (lib/posture.ts).
+  // Requesting it changes the #1516 revision, because the server folds the
+  // requested block names into it, so no stale "unchanged" can hide it.
+  ACTING_TOOLS_BLOCK
 ];
 function debugEnabled() {
   let value = process.env.MYPENNY_DEBUG?.trim().toLowerCase();
@@ -688,16 +842,18 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
         status: response.status
       }), { unauthorized: response.status === 401, value: null };
     let data = await response.json();
-    return data.error ? (debugLog2(`[mypenny] MCP tool ${name} failed: ${data.error.message}`), recordDiag({
-      event: "memory_tool",
-      outcome: "fail",
-      tool: name,
-      reason: "jsonrpc",
-      status: data.error.code
-    }), { unauthorized: !1, value: null }) : data.result?.isError === !0 ? (recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason: "tool_error" }), { unauthorized: !1, value: null }) : {
-      unauthorized: !1,
-      value: data.result?.content?.find((c) => c.type === "text")?.text ?? null
-    };
+    if (data.error)
+      return debugLog2(`[mypenny] MCP tool ${name} failed: ${data.error.message}`), recordDiag({
+        event: "memory_tool",
+        outcome: "fail",
+        tool: name,
+        reason: "jsonrpc",
+        status: data.error.code
+      }), { unauthorized: !1, value: null };
+    if (data.result?.isError === !0)
+      return debugLog2(`[mypenny] MCP tool ${name} returned a tool error`), recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason: "tool_error" }), { unauthorized: !1, value: null };
+    let text = data.result?.content?.find((c) => c.type === "text")?.text;
+    return typeof text != "string" || text.length === 0 ? (recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason: "empty" }), { unauthorized: !1, value: null }) : { unauthorized: !1, value: text };
   } catch (err) {
     let reason = err instanceof Error && err.name === "AbortError" ? "timeout" : "network";
     return debugLog2(
@@ -705,36 +861,40 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
     ), recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason }), { unauthorized: !1, value: null };
   }
 }
-async function fetchCoreMemoryBlocks(projectKey, timeoutMs, ifRevision, onCredential) {
+async function fetchCoreMemoryBlocks(projectKey, legacyProjectKey, timeoutMs, ifRevision, onCredential) {
   let raw = await callTool(
-    "penny_get_profile",
+    PROFILE_TOOL,
     {
+      target: "profile",
       projectKey,
-      blockNames: [...GUIDANCE_BLOCK_NAMES, `subconscious:${projectKey}`],
+      ...legacyProjectKey !== void 0 ? { legacyProjectKey } : {},
+      blockNames: [
+        ...GUIDANCE_BLOCK_NAMES,
+        `subconscious:${projectKey}`,
+        ...legacyProjectKey !== void 0 ? [`subconscious:${legacyProjectKey}`] : []
+      ],
       ...ifRevision !== void 0 ? { ifRevision } : {}
     },
     timeoutMs,
     onCredential
   );
-  if (raw === null) return { blocks: [], contract: "", ok: !1, unchanged: !1 };
+  if (raw === null) return { blocks: [], globalBlocks: [], contract: "", ok: !1, unchanged: !1 };
   try {
     let parsed = JSON.parse(raw);
     if (Object.hasOwn(parsed, "unchanged"))
-      return parsed.unchanged !== !0 || ifRevision === void 0 || typeof parsed.revision != "string" || parsed.revision !== ifRevision ? { blocks: [], contract: "", ok: !1, unchanged: !1 } : { blocks: [], contract: "", ok: !0, unchanged: !0, revision: parsed.revision };
-    let byName = /* @__PURE__ */ new Map();
-    for (let group of [parsed.global, parsed.workspace])
-      if (Array.isArray(group))
-        for (let b of group)
-          typeof b?.blockName == "string" && byName.set(b.blockName, { blockName: b.blockName, content: b.content || "" });
+      return parsed.unchanged !== !0 || ifRevision === void 0 || typeof parsed.revision != "string" || parsed.revision !== ifRevision ? { blocks: [], globalBlocks: [], contract: "", ok: !1, unchanged: !1 } : { blocks: [], globalBlocks: [], contract: "", ok: !0, unchanged: !0, revision: parsed.revision };
+    let toBlocks = (group) => Array.isArray(group) ? group.filter((b) => typeof b?.blockName == "string").map((b) => ({ blockName: b.blockName, content: b.content || "" })) : [], globalBlocks = toBlocks(parsed.global), byName = /* @__PURE__ */ new Map();
+    for (let b of [...globalBlocks, ...toBlocks(parsed.workspace)]) byName.set(b.blockName, b);
     let contract = typeof parsed.contract == "string" ? parsed.contract : "", revision = typeof parsed.revision == "string" ? parsed.revision : void 0;
-    return { blocks: [...byName.values()], contract, ok: !0, unchanged: !1, revision };
+    return { blocks: [...byName.values()], globalBlocks, contract, ok: !0, unchanged: !1, revision };
   } catch {
-    return recordDiag({ event: "memory_tool", outcome: "fail", tool: "penny_get_profile", reason: "parse" }), { blocks: [], contract: "", ok: !1, unchanged: !1 };
+    return recordDiag({ event: "memory_tool", outcome: "fail", tool: PROFILE_TOOL, reason: "parse" }), { blocks: [], globalBlocks: [], contract: "", ok: !1, unchanged: !1 };
   }
 }
 async function fetchGuidance(cwd, timeoutMs, ifRevision) {
-  let projectKey = deriveProjectKey(cwd), fetchedWith, { blocks: blocks2, contract, ok, unchanged, revision } = await fetchCoreMemoryBlocks(
+  let { projectKey, legacyProjectKey } = deriveProjectKeys(cwd), fetchedWith, { blocks: blocks2, globalBlocks, contract, ok, unchanged, revision } = await fetchCoreMemoryBlocks(
     projectKey,
+    legacyProjectKey,
     timeoutMs,
     ifRevision,
     (tag) => {
@@ -750,14 +910,14 @@ async function fetchGuidance(cwd, timeoutMs, ifRevision) {
       tokenTag: fetchedWith,
       guidance: { ...emptyGuidance(projectKey), revision }
     };
-  let block = (name) => blocks2.find((b) => b.blockName === name)?.content ?? "";
+  let block = (name) => blocks2.find((b) => b.blockName === name)?.content ?? "", subconscious = block(`subconscious:${projectKey}`) || (legacyProjectKey !== void 0 ? block(`subconscious:${legacyProjectKey}`) : "");
   return {
     ok,
     unchanged: !1,
     tokenTag: fetchedWith,
     guidance: {
       userFacts: block("user_facts"),
-      subconscious: block(`subconscious:${projectKey}`),
+      subconscious,
       codingGuidance: block("coding_guidance"),
       // memory_policy: how this user wants to be remembered (spec 2026-09-05).
       // Empty string when the user has not taught Penny anything yet — the
@@ -766,6 +926,9 @@ async function fetchGuidance(cwd, timeoutMs, ifRevision) {
       persona: block("persona"),
       preferences: block("preferences"),
       contract,
+      // The user's own list only. A shared Space's block would otherwise win
+      // the merge below, and any member of the Space can write it.
+      actingTools: globalBlocks.find((b) => b.blockName === ACTING_TOOLS_BLOCK)?.content ?? "",
       projectKey,
       revision
     }
@@ -796,7 +959,7 @@ function armWatchdog(budgetMs, exitCode = 0) {
   if (!Number.isFinite(budgetMs) || budgetMs <= 0) return () => {
   };
   let timer = setTimeout(() => {
-    process.exit(exitCode);
+    recordDiag({ event: "watchdog", outcome: "fail", reason: "timeout" }), process.exit(exitCode);
   }, budgetMs);
   return timer.unref?.(), () => clearTimeout(timer);
 }
@@ -805,7 +968,7 @@ function armWatchdog(budgetMs, exitCode = 0) {
 import * as fs8 from "node:fs";
 import * as path7 from "node:path";
 import { fileURLToPath } from "node:url";
-var DAY_MS = 1440 * 60 * 1e3, REGISTRY = "https://registry.npmjs.org", PLUGIN_ROOT_ENV_VARS = ["CLAUDE_PLUGIN_ROOT", "CODEX_PLUGIN_ROOT", "PLUGIN_ROOT"], MANIFEST_SUBPATHS = [
+var DAY_MS = 1440 * 60 * 1e3, REGISTRY = "https://registry.npmjs.org", PLUGIN_ROOT_ENV_VARS = ["CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT"], MANIFEST_SUBPATHS = [
   [".claude-plugin", "plugin.json"],
   [".codex-plugin", "plugin.json"]
 ];
@@ -937,18 +1100,105 @@ function codexToolLoadingNotice(host) {
 `);
 }
 
+// plugins/mypenny-core/lib/off-record.ts
+import * as fs9 from "node:fs";
+import * as path8 from "node:path";
+var SAFE_SESSION_ID2 = /^[A-Za-z0-9._-]{1,200}$/;
+function safeId(sessionId) {
+  return typeof sessionId == "string" && SAFE_SESSION_ID2.test(sessionId);
+}
+function offRecordPath(sessionId) {
+  return path8.join(sessionsDir(), `${sessionId}.offrecord.json`);
+}
+function isOffRecord(sessionId) {
+  return safeId(sessionId) && fs9.existsSync(offRecordPath(sessionId));
+}
+var TAIL_BYTES = 256 * 1024;
+function sessionLine(sessionId, host) {
+  if (!safeId(sessionId) || !/^[a-z-]{1,40}$/.test(host)) return null;
+  let body = isOffRecord(sessionId) ? "This session is off the record: its transcript no longer reaches Penny. Don't save notes from it unless the user asks for a specific one." : 'If the user asks to go off the record, call penny_edit with entityType "session", record "off" and this id as sessionId.';
+  return `<mypenny-session id="${sessionId}" host="${host}">${body}</mypenny-session>`;
+}
+var LIVE_WINDOW_MS = 7200 * 1e3;
+
+// plugins/mypenny-core/lib/profile-file.ts
+import * as fs10 from "node:fs";
+import * as path9 from "node:path";
+import * as crypto7 from "node:crypto";
+function profilePath(sessionId) {
+  return path9.join(sessionsDir(), `${encodeURIComponent(sessionId)}.profile.txt`);
+}
+function markerPath(sessionId) {
+  return path9.join(sessionsDir(), `${encodeURIComponent(sessionId)}.mod`);
+}
+function hasProfileMod(sessionId) {
+  return fs10.existsSync(markerPath(sessionId));
+}
+function writeProfile(sessionId, text) {
+  fs10.mkdirSync(sessionsDir(), { recursive: !0 });
+  let target = profilePath(sessionId), temp = `${target}.${crypto7.randomUUID()}.tmp`;
+  try {
+    fs10.writeFileSync(temp, text, { mode: 384 }), fs10.renameSync(temp, target);
+  } finally {
+    try {
+      fs10.unlinkSync(temp);
+    } catch {
+    }
+  }
+}
+function snapshotPath(sessionId, part) {
+  return path9.join(sessionsDir(), `${encodeURIComponent(sessionId)}.guidance-part-${part}.json`);
+}
+function writeGuidanceSnapshot(sessionId, part, guidance) {
+  fs10.mkdirSync(sessionsDir(), { recursive: !0 });
+  let target = snapshotPath(sessionId, part), temp = `${target}.${crypto7.randomUUID()}.tmp`;
+  try {
+    fs10.writeFileSync(temp, JSON.stringify(guidance), { mode: 384 }), fs10.renameSync(temp, target);
+  } finally {
+    try {
+      fs10.unlinkSync(temp);
+    } catch {
+    }
+  }
+}
+
 // plugins/mypenny-core/scripts/session_start.ts
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import * as path8 from "node:path";
+import * as path10 from "node:path";
 var DEBUG = process.env.MYPENNY_DEBUG === "1", debug = (...args) => {
   DEBUG && console.error("[mypenny:session_start]", ...args);
-}, GUIDANCE_TIMEOUT_MS = 2500, WATCHDOG_MS = 4e3;
+}, GUIDANCE_TIMEOUT_MS = 2500, WATCHDOG_MS = 4e3, HOST = parseHost(process.argv.slice(2)), partArg = process.argv.indexOf("--part"), PART = HOST === "claude-code" && partArg >= 0 ? Number(process.argv[partArg + 1]) : 0, cursorLines = HOST === "cursor" ? [] : null, cursorFlushed = !1;
+function emit(line) {
+  cursorLines ? cursorLines.push(line) : console.log(line);
+}
+function flushForCursor() {
+  !cursorLines || cursorFlushed || (cursorFlushed = !0, console.log(JSON.stringify(cursorLines.length > 0 ? { additional_context: cursorLines.join(`
+`) } : {})));
+}
+function clearClaimedProfile(sessionId) {
+  if (!(HOST !== "claude-code" || PART === 2 || PART === 3))
+    try {
+      hasProfileMod(sessionId) && writeProfile(sessionId, "");
+    } catch {
+    }
+}
 async function main() {
-  if (process.env.MYPENNY_SUBCONSCIOUS === "off") return;
   let raw = await readHookInput(), hookInput = normalizeHookInput(raw);
   if (!hookInput) return;
-  if (setDiagContext({ hook: "session_start", sessionId: hookInput.session_id }), !readToken()) {
-    let authScript = path8.join(path8.dirname(fileURLToPath2(import.meta.url)), "auth_login.mjs");
+  if (process.env.MYPENNY_SUBCONSCIOUS === "off") {
+    clearClaimedProfile(hookInput.session_id);
+    return;
+  }
+  if (setDiagContext({ hook: "session_start", sessionId: hookInput.session_id }), PART === 2 || PART === 3) {
+    if (hasProfileMod(hookInput.session_id) || !readToken()) return;
+    let disarm = armWatchdog(WATCHDOG_MS), { guidance: guidance2 } = await getSessionStartGuidance(hookInput.cwd, GUIDANCE_TIMEOUT_MS), output2 = formatGuidanceParts(guidance2, "start")[PART - 1];
+    disarm(), output2 && emit(output2), writeGuidanceSnapshot(hookInput.session_id, PART, guidance2);
+    return;
+  }
+  let ownId = raw ? hookSessionId(raw) : null, idLine = ownId === null ? null : sessionLine(ownId, HOST ?? "unknown");
+  if (idLine ? emit(idLine) : recordDiag({ event: "off_record", outcome: "skip", reason: "no_session_line" }), !readToken()) {
+    clearClaimedProfile(hookInput.session_id);
+    let authScript = path10.join(path10.dirname(fileURLToPath2(import.meta.url)), "auth_login.mjs");
     process.stderr.write(
       `[mypenny] plugin not authenticated. Run: node "${authScript}"
 `
@@ -957,15 +1207,15 @@ async function main() {
   }
   let repairNotice = authRepairNotice(readAuthHealth());
   if (repairNotice) {
-    let authScript = path8.join(path8.dirname(fileURLToPath2(import.meta.url)), "auth_login.mjs");
+    let authScript = path10.join(path10.dirname(fileURLToPath2(import.meta.url)), "auth_login.mjs");
     process.stderr.write(`[mypenny] ${repairNotice} Run: node "${authScript}"
-`), console.log(
+`), emit(
       `<mypenny_auth_notice>
 ${repairNotice} Tell the user to re-pair by running: node "${authScript}"
 </mypenny_auth_notice>`
     );
   }
-  armWatchdog(WATCHDOG_MS), debug("Session start:", hookInput.session_id, hookInput.cwd), readState(hookInput.session_id) || createState(hookInput.session_id, hookInput.cwd), cleanupStaleSessions();
+  armWatchdog(WATCHDOG_MS, cursorLines ? 1 : 0), debug("Session start:", hookInput.session_id, hookInput.cwd), readState(hookInput.session_id) || createState(hookInput.session_id, hookInput.cwd), cleanupStaleSessions();
   let { guidance, fromCache } = await getSessionStartGuidance(
     hookInput.cwd,
     GUIDANCE_TIMEOUT_MS
@@ -974,11 +1224,16 @@ ${repairNotice} Tell the user to re-pair by running: node "${authScript}"
     `Guidance (${fromCache ? "cache" : "network"}): project=${guidance.projectKey} contract=${guidance.contract.length}b persona=${guidance.persona.length}b user=${guidance.userFacts.length}b prefs=${guidance.preferences.length}b sub=${guidance.subconscious.length}b coding=${guidance.codingGuidance.length}b policy=${guidance.memoryPolicy.length}b`
   );
   let output = formatInjection(guidance, []);
-  output && console.log(output);
+  HOST === "claude-code" ? (writeProfile(hookInput.session_id, output), output && !hasProfileMod(hookInput.session_id) && (emit(PART === 1 ? formatGuidanceParts(guidance, "start")[0] : output), PART === 1 && writeGuidanceSnapshot(hookInput.session_id, PART, guidance))) : output && emit(output);
+  let listNotice = actingToolsNotice(guidance.actingTools ?? "");
+  listNotice && emit(listNotice);
   let state = readState(hookInput.session_id);
   state && writeState(withGuidanceHash(state, guidance));
-  let toolNotice = codexToolLoadingNotice(parseHost(process.argv.slice(2)));
-  toolNotice && console.log(toolNotice);
+  let toolNotice = codexToolLoadingNotice(HOST);
+  if (toolNotice && emit(toolNotice), cursorLines) {
+    flushForCursor();
+    return;
+  }
   try {
     let updateNotice = await checkPluginFreshness();
     updateNotice && console.log(`<mypenny_update_notice>
@@ -988,6 +1243,6 @@ ${updateNotice}
     debug("version check failed:", err);
   }
 }
-main().catch((err) => {
-  DEBUG && console.error("[mypenny:session_start] error:", err), process.exit(0);
+main().then(flushForCursor).catch((err) => {
+  DEBUG && console.error("[mypenny:session_start] error:", err), process.exit(cursorLines ? 1 : 0);
 });
