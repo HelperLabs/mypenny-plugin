@@ -1070,7 +1070,7 @@ async function checkPluginFreshness(opts = {}) {
     fetched && (entry.latestVersion = fetched), entry.checkedAt = now, mutated = !0;
   }
   let latest = entry.latestVersion ?? null, cmp = latest === null ? null : compareSemver(installed.version, latest);
-  return latest === null || cmp === null || cmp >= 0 || entry.lastNotifiedVersion === latest && typeof entry.lastNotifiedAt == "number" && now - entry.lastNotifiedAt < ttlMs ? (mutated && (cache[installed.npmName] = entry, writeCache(cache)), null) : (entry.lastNotifiedVersion = latest, entry.lastNotifiedAt = now, cache[installed.npmName] = entry, writeCache(cache), `Penny plugin update available: installed ${installed.version}, latest ${latest}. Updating refreshes the memory skill and MCP tool catalog. Let the user know they can update the Penny plugin via their plugin marketplace (or reinstall ${installed.npmName}).`);
+  return latest === null || cmp === null || cmp >= 0 || entry.lastNotifiedVersion === latest && typeof entry.lastNotifiedAt == "number" && now - entry.lastNotifiedAt < ttlMs ? (mutated && (cache[installed.npmName] = entry, writeCache(cache)), null) : (entry.lastNotifiedVersion = latest, entry.lastNotifiedAt = now, cache[installed.npmName] = entry, writeCache(cache), `Penny plugin update available: installed ${installed.version}, latest ${latest}. Updating refreshes the plugin's hooks and connection settings. Let the user know they can update the Penny plugin via their plugin marketplace (or reinstall ${installed.npmName}).`);
 }
 
 // plugins/mypenny-core/lib/host.ts

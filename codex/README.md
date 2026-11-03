@@ -1,8 +1,9 @@
 # @mypenny/codex
 
 Codex plugin shell for Penny memory. It installs the Penny MCP server
-definition, Penny skill, and lifecycle hooks; hook behavior lives in
-`@mypenny/core`.
+definition, a `start-penny` pointer skill, and lifecycle hooks; hook behavior
+lives in `@mypenny/core`. The pointer tells the AI to read the Penny skill from
+Penny, so the plugin carries no copy of it.
 Codex exposes the installed plugin directory to hooks through `PLUGIN_ROOT`
 (and `CLAUDE_PLUGIN_ROOT`, for compatibility). It does not set
 `CODEX_PLUGIN_ROOT`; hooks that used that name failed on every Codex install
@@ -26,7 +27,7 @@ provide the same behavior guarantees.
 - ChatGPT App V1 uses MCP instructions, tool descriptions, listing copy, and
   the ChatGPT Memory Setup widget.
 - Codex uses this plugin for a stronger lane: bundled MCP configuration, the
-  Penny skill, and lifecycle hooks.
+  `start-penny` pointer skill, and lifecycle hooks.
 - Installing the ChatGPT App does not automatically make this Codex plugin
   active, and installing this Codex plugin does not automatically install the
   ChatGPT App.
@@ -54,8 +55,8 @@ the Penny tools in chat use the MCP sign-in, the hooks use the token.
 
 ## Upgrade
 
-Refresh the marketplace source, then restart Codex so the bundled skill, MCP
-configuration, and hooks are reloaded:
+Refresh the marketplace source, then restart Codex so the `start-penny`
+skill, MCP configuration, and hooks are reloaded:
 
 ```
 codex plugin marketplace upgrade HelperLabs/mypenny-plugin

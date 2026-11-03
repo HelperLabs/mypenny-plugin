@@ -1,8 +1,10 @@
 # @mypenny/claude
 
 Claude Code plugin shell for Penny memory. It bundles the Penny MCP
-server definition, the Penny skill, and hook config files; hook behavior
-lives in `@mypenny/core`.
+server definition, a `start-penny` pointer skill, and hook config files; hook
+behavior lives in `@mypenny/core`. The pointer tells the AI to call
+`penny_session_start` and read the Penny skill from Penny, which serves that
+skill and keeps it current, so the plugin carries no copy of it.
 
 The bundled MCP server points at `https://app.mypenny.ai/mcp` — a literal
 URL, because surfaces like the Claude desktop app pass the config through
@@ -27,8 +29,8 @@ Refresh the `mypenny` marketplace/source, then reinstall
 /plugin install mypenny-claude@mypenny
 ```
 
-After upgrading, restart Claude Code or open a fresh session so the bundled
-Penny skill and hooks reload.
+After upgrading, restart Claude Code or open a fresh session so the
+`start-penny` skill and hooks reload.
 
 ## First-launch
 On first SessionStart the plugin prints an auth hint to stderr with the exact
