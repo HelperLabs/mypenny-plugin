@@ -40,6 +40,20 @@ which you must never exceed:
   message) but must not commit it; record it for the user to approve.
 - **act** — you may carry it out directly.
 
+Where the Penny coding plugin is installed (Claude Code, Codex, Cursor,
+including unattended runs), a `read` or `propose` run's posture is also
+checked: a call that acts on the outside world is refused with a reason, and
+closing the run lifts that only after the user's next message. Do what the
+reason says (save a proposal note) instead of retrying, and never work around
+a refusal. The check catches ordinary commands, not everything, so the
+ceiling above is still yours to keep. Beyond the built-in list (pushing,
+publishing, deploying, sending), the user decides which tools count, in
+their `acting_tools` profile block: one rule per line, `acting: <tool>` or
+`reading: <tool>`, where `<tool>` is a tool name (`*` allowed); an acting
+line can also be `Bash(<command words>)`. When the user says a tool should
+count as acting, or that a run may use a read tool, update that block in the
+same turn. It can't change while a skill is running in the conversation.
+
 Running one: on the user's go-ahead, `penny_write` (`entityType:
 "skill_run"`) returns the run's manifest and a run id. Execute it yourself —
 follow its `instructions`, honor its posture as a hard ceiling, deliver the

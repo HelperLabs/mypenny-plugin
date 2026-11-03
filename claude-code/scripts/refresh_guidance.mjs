@@ -163,22 +163,37 @@ function readEnvConfig() {
 }
 
 // plugins/mypenny-core/lib/project-key.ts
+import * as crypto3 from "node:crypto";
 import * as fs3 from "node:fs";
 import * as path2 from "node:path";
 function deriveProjectKey(cwd) {
+  return deriveProjectKeys(cwd).projectKey;
+}
+var READABLE_KEY_MAX = 200;
+function deriveProjectKeys(cwd) {
+  let identity = deriveIdentity(cwd);
+  if (!identity.hostAndPath) return { projectKey: identity.key };
+  let readable = sanitizeKey(identity.path), capped = readable.length > READABLE_KEY_MAX ? readable.slice(0, READABLE_KEY_MAX).replace(/-+$/, "") : readable, projectKey = `${capped}-${repositoryHash(identity.path)}`;
+  return capped === readable && readable !== "unknown" ? { projectKey, legacyProjectKey: readable } : { projectKey };
+}
+function deriveIdentity(cwd) {
   try {
     let gitRoot = findGitRoot(cwd);
     if (gitRoot) {
       let configPath2 = resolveGitConfigPath(gitRoot);
       if (configPath2 && fs3.existsSync(configPath2)) {
-        let remote = parseOriginRemote(fs3.readFileSync(configPath2, "utf-8"));
-        if (remote) return sanitizeKey(remote);
+        let url = parseOriginUrl(fs3.readFileSync(configPath2, "utf-8"));
+        if (url) {
+          let repo = extractRepoPath(url);
+          if (repo?.hostAndPath) return { hostAndPath: !0, path: repo.path };
+          if (repo) return { hostAndPath: !1, key: sanitizeKey(repo.path) };
+        }
       }
-      return sanitizeKey(path2.basename(gitRoot));
+      return { hostAndPath: !1, key: sanitizeKey(path2.basename(gitRoot)) };
     }
   } catch {
   }
-  return sanitizeKey(path2.basename(cwd));
+  return { hostAndPath: !1, key: sanitizeKey(path2.basename(cwd)) };
 }
 function findGitRoot(start) {
   let dir = start;
@@ -215,7 +230,7 @@ function resolveGitConfigPath(gitRoot) {
   }
   return null;
 }
-function parseOriginRemote(configText) {
+function parseOriginUrl(configText) {
   let lines = configText.split(`
 `), inOrigin = !1;
   for (let line of lines) {
@@ -226,12 +241,62 @@ function parseOriginRemote(configText) {
     }
     if (!inOrigin) continue;
     let urlMatch = trimmed.match(/^url\s*=\s*(.+)$/);
-    if (urlMatch) return extractRepoName(urlMatch[1]);
+    if (urlMatch) return urlMatch[1];
   }
   return null;
 }
+function extractRepoPath(url) {
+  let cleaned = url.trim().replace(/[/\\]+$/, "");
+  if (!cleaned) return null;
+  if (/^[a-z]:[\\/]/i.test(cleaned)) return basenameOf(cleaned);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(cleaned))
+    try {
+      let parsed = new URL(cleaned), host = parsed.hostname;
+      if (!host) return basenameOf(parsed.pathname);
+      let repoPath = normalizeRepoPath(parsed.pathname, !0);
+      return repoPath ? { path: `${host}/${repoPath}`, hostAndPath: !0 } : { path: host, hostAndPath: !1 };
+    } catch {
+      return null;
+    }
+  let scp = cleaned.match(/^(?:[^@\s/]+@)?([^:/\s]+):(.+)$/);
+  if (scp) {
+    let repoPath = normalizeRepoPath(scp[2], !1);
+    return repoPath ? { path: `${scp[1]}/${repoPath}`, hostAndPath: !0 } : null;
+  }
+  return basenameOf(cleaned);
+}
+function normalizeRepoPath(raw, percentEncoded) {
+  let segments = [];
+  for (let part of raw.split("/")) {
+    let segment = part;
+    if (percentEncoded)
+      try {
+        segment = decodeURIComponent(segment);
+      } catch {
+      }
+    if (segment = segment.normalize("NFC"), !(segment === "" || segment === ".")) {
+      if (segment === "..") {
+        segments.pop();
+        continue;
+      }
+      segments.push(segment);
+    }
+  }
+  if (segments.length > 0 && segments[segments.length - 1].toLowerCase() === ".git" && segments.pop(), segments.length > 0) {
+    let last = segments.length - 1;
+    segments[last] = segments[last].replace(/\.git$/i, ""), segments[last] === "" && segments.pop();
+  }
+  return segments.join("/");
+}
+function repositoryHash(hostAndPath) {
+  return crypto3.createHash("sha256").update(hostAndPath.toLowerCase()).digest("hex").slice(0, 8);
+}
+function basenameOf(location) {
+  let name = extractRepoName(location);
+  return name ? { path: name, hostAndPath: !1 } : null;
+}
 function extractRepoName(url) {
-  return url.trim().replace(/\.git$/, "").split(/[/:]/).pop() || null;
+  return url.trim().replace(/[/\\]+$/, "").replace(/\.git$/i, "").split(/[/:\\]/).pop() || null;
 }
 function sanitizeKey(raw) {
   return raw.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unknown";
@@ -240,10 +305,10 @@ function sanitizeKey(raw) {
 // plugins/mypenny-core/lib/claim.ts
 import * as fs4 from "node:fs";
 import * as path3 from "node:path";
-import * as crypto3 from "node:crypto";
+import * as crypto4 from "node:crypto";
 var KEEP_WINDOWS = 2;
 function claimStem(name) {
-  let safe = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "claim", digest = crypto3.createHash("sha256").update(name).digest("hex").slice(0, 8);
+  let safe = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "claim", digest = crypto4.createHash("sha256").update(name).digest("hex").slice(0, 8);
   return `${safe}.${digest}`;
 }
 function prune(dir, stem, currentWindow) {
@@ -350,13 +415,13 @@ async function withTokenRotation(attempt, token, timeoutMs) {
 // plugins/mypenny-core/lib/guidance-cache.ts
 import * as fs5 from "node:fs";
 import * as path4 from "node:path";
-import * as crypto4 from "node:crypto";
+import * as crypto5 from "node:crypto";
 var GUIDANCE_TTL_MS = 600 * 1e3;
 function tokenTag(token) {
-  return crypto4.createHash("sha256").update(token).digest("hex").slice(0, 16);
+  return crypto5.createHash("sha256").update(token).digest("hex").slice(0, 16);
 }
 function cacheFile(projectKey) {
-  let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto4.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
+  let safe = projectKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "unknown", digest = crypto5.createHash("sha256").update(projectKey).digest("hex").slice(0, 8);
   return path4.join(guidanceDir(), `${safe}.${digest}.json`);
 }
 function readGuidanceCache(projectKey, expectedTokenTag) {
@@ -372,7 +437,8 @@ function readGuidanceCache(projectKey, expectedTokenTag) {
       b.memoryPolicy,
       b.persona,
       b.preferences,
-      b.contract
+      b.contract,
+      b.actingTools
     ].some((value) => typeof value != "string"), str = (v) => typeof v == "string" ? v : "";
     return {
       fetchedAt: incomplete ? Number.NEGATIVE_INFINITY : parsed.fetchedAt,
@@ -384,6 +450,7 @@ function readGuidanceCache(projectKey, expectedTokenTag) {
         persona: str(b.persona),
         preferences: str(b.preferences),
         contract: str(b.contract),
+        actingTools: str(b.actingTools),
         projectKey: typeof b.projectKey == "string" ? b.projectKey : projectKey,
         // A missing revision alone is compatible with an older full response.
         ...!incomplete && typeof b.revision == "string" ? { revision: b.revision } : {}
@@ -397,7 +464,7 @@ function readGuidanceCache(projectKey, expectedTokenTag) {
 function writeGuidanceCache(projectKey, bundle, now = Date.now(), fetchedWithTokenTag) {
   try {
     fs5.mkdirSync(guidanceDir(), { recursive: !0 });
-    let target = cacheFile(projectKey), tmp = `${target}.${crypto4.randomUUID()}.tmp`, payload = {
+    let target = cacheFile(projectKey), tmp = `${target}.${crypto5.randomUUID()}.tmp`, payload = {
       bundle,
       fetchedAt: now,
       ...fetchedWithTokenTag ? { tokenTag: fetchedWithTokenTag } : {}
@@ -444,6 +511,10 @@ function recordDiag(record) {
     }
 }
 
+// plugins/mypenny-core/lib/posture.ts
+var ACTING_TOOLS_BLOCK = "acting_tools";
+var SILENT = Object.freeze({ kind: "silent" });
+
 // plugins/mypenny-core/lib/format.ts
 function emptyGuidance(projectKey) {
   return {
@@ -454,17 +525,23 @@ function emptyGuidance(projectKey) {
     persona: "",
     preferences: "",
     contract: "",
+    actingTools: "",
     projectKey
   };
 }
 
 // plugins/mypenny-core/lib/memory-client.ts
-var TIMEOUT_MS = 6e3, GUIDANCE_BLOCK_NAMES = [
+var TIMEOUT_MS = 6e3;
+var PROFILE_TOOL = "penny_read", GUIDANCE_BLOCK_NAMES = [
   "user_facts",
   "persona",
   "preferences",
   "coding_guidance",
-  "memory_policy"
+  "memory_policy",
+  // Not injected: the posture gate reads it from the cache (lib/posture.ts).
+  // Requesting it changes the #1516 revision, because the server folds the
+  // requested block names into it, so no stale "unchanged" can hide it.
+  ACTING_TOOLS_BLOCK
 ];
 function debugEnabled() {
   let value = process.env.MYPENNY_DEBUG?.trim().toLowerCase();
@@ -511,16 +588,18 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
         status: response.status
       }), { unauthorized: response.status === 401, value: null };
     let data = await response.json();
-    return data.error ? (debugLog2(`[mypenny] MCP tool ${name} failed: ${data.error.message}`), recordDiag({
-      event: "memory_tool",
-      outcome: "fail",
-      tool: name,
-      reason: "jsonrpc",
-      status: data.error.code
-    }), { unauthorized: !1, value: null }) : data.result?.isError === !0 ? (recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason: "tool_error" }), { unauthorized: !1, value: null }) : {
-      unauthorized: !1,
-      value: data.result?.content?.find((c) => c.type === "text")?.text ?? null
-    };
+    if (data.error)
+      return debugLog2(`[mypenny] MCP tool ${name} failed: ${data.error.message}`), recordDiag({
+        event: "memory_tool",
+        outcome: "fail",
+        tool: name,
+        reason: "jsonrpc",
+        status: data.error.code
+      }), { unauthorized: !1, value: null };
+    if (data.result?.isError === !0)
+      return debugLog2(`[mypenny] MCP tool ${name} returned a tool error`), recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason: "tool_error" }), { unauthorized: !1, value: null };
+    let text = data.result?.content?.find((c) => c.type === "text")?.text;
+    return typeof text != "string" || text.length === 0 ? (recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason: "empty" }), { unauthorized: !1, value: null }) : { unauthorized: !1, value: text };
   } catch (err) {
     let reason = err instanceof Error && err.name === "AbortError" ? "timeout" : "network";
     return debugLog2(
@@ -528,36 +607,40 @@ async function callToolOnce(name, args, token, memoryUrl, timeoutMs = TIMEOUT_MS
     ), recordDiag({ event: "memory_tool", outcome: "fail", tool: name, reason }), { unauthorized: !1, value: null };
   }
 }
-async function fetchCoreMemoryBlocks(projectKey, timeoutMs, ifRevision, onCredential) {
+async function fetchCoreMemoryBlocks(projectKey, legacyProjectKey, timeoutMs, ifRevision, onCredential) {
   let raw = await callTool(
-    "penny_get_profile",
+    PROFILE_TOOL,
     {
+      target: "profile",
       projectKey,
-      blockNames: [...GUIDANCE_BLOCK_NAMES, `subconscious:${projectKey}`],
+      ...legacyProjectKey !== void 0 ? { legacyProjectKey } : {},
+      blockNames: [
+        ...GUIDANCE_BLOCK_NAMES,
+        `subconscious:${projectKey}`,
+        ...legacyProjectKey !== void 0 ? [`subconscious:${legacyProjectKey}`] : []
+      ],
       ...ifRevision !== void 0 ? { ifRevision } : {}
     },
     timeoutMs,
     onCredential
   );
-  if (raw === null) return { blocks: [], contract: "", ok: !1, unchanged: !1 };
+  if (raw === null) return { blocks: [], globalBlocks: [], contract: "", ok: !1, unchanged: !1 };
   try {
     let parsed = JSON.parse(raw);
     if (Object.hasOwn(parsed, "unchanged"))
-      return parsed.unchanged !== !0 || ifRevision === void 0 || typeof parsed.revision != "string" || parsed.revision !== ifRevision ? { blocks: [], contract: "", ok: !1, unchanged: !1 } : { blocks: [], contract: "", ok: !0, unchanged: !0, revision: parsed.revision };
-    let byName = /* @__PURE__ */ new Map();
-    for (let group of [parsed.global, parsed.workspace])
-      if (Array.isArray(group))
-        for (let b of group)
-          typeof b?.blockName == "string" && byName.set(b.blockName, { blockName: b.blockName, content: b.content || "" });
+      return parsed.unchanged !== !0 || ifRevision === void 0 || typeof parsed.revision != "string" || parsed.revision !== ifRevision ? { blocks: [], globalBlocks: [], contract: "", ok: !1, unchanged: !1 } : { blocks: [], globalBlocks: [], contract: "", ok: !0, unchanged: !0, revision: parsed.revision };
+    let toBlocks = (group) => Array.isArray(group) ? group.filter((b) => typeof b?.blockName == "string").map((b) => ({ blockName: b.blockName, content: b.content || "" })) : [], globalBlocks = toBlocks(parsed.global), byName = /* @__PURE__ */ new Map();
+    for (let b of [...globalBlocks, ...toBlocks(parsed.workspace)]) byName.set(b.blockName, b);
     let contract = typeof parsed.contract == "string" ? parsed.contract : "", revision = typeof parsed.revision == "string" ? parsed.revision : void 0;
-    return { blocks: [...byName.values()], contract, ok: !0, unchanged: !1, revision };
+    return { blocks: [...byName.values()], globalBlocks, contract, ok: !0, unchanged: !1, revision };
   } catch {
-    return recordDiag({ event: "memory_tool", outcome: "fail", tool: "penny_get_profile", reason: "parse" }), { blocks: [], contract: "", ok: !1, unchanged: !1 };
+    return recordDiag({ event: "memory_tool", outcome: "fail", tool: PROFILE_TOOL, reason: "parse" }), { blocks: [], globalBlocks: [], contract: "", ok: !1, unchanged: !1 };
   }
 }
 async function fetchGuidance(cwd, timeoutMs, ifRevision) {
-  let projectKey = deriveProjectKey(cwd), fetchedWith, { blocks, contract, ok, unchanged, revision } = await fetchCoreMemoryBlocks(
+  let { projectKey, legacyProjectKey } = deriveProjectKeys(cwd), fetchedWith, { blocks, globalBlocks, contract, ok, unchanged, revision } = await fetchCoreMemoryBlocks(
     projectKey,
+    legacyProjectKey,
     timeoutMs,
     ifRevision,
     (tag) => {
@@ -573,14 +656,14 @@ async function fetchGuidance(cwd, timeoutMs, ifRevision) {
       tokenTag: fetchedWith,
       guidance: { ...emptyGuidance(projectKey), revision }
     };
-  let block = (name) => blocks.find((b) => b.blockName === name)?.content ?? "";
+  let block = (name) => blocks.find((b) => b.blockName === name)?.content ?? "", subconscious = block(`subconscious:${projectKey}`) || (legacyProjectKey !== void 0 ? block(`subconscious:${legacyProjectKey}`) : "");
   return {
     ok,
     unchanged: !1,
     tokenTag: fetchedWith,
     guidance: {
       userFacts: block("user_facts"),
-      subconscious: block(`subconscious:${projectKey}`),
+      subconscious,
       codingGuidance: block("coding_guidance"),
       // memory_policy: how this user wants to be remembered (spec 2026-09-05).
       // Empty string when the user has not taught Penny anything yet — the
@@ -589,6 +672,9 @@ async function fetchGuidance(cwd, timeoutMs, ifRevision) {
       persona: block("persona"),
       preferences: block("preferences"),
       contract,
+      // The user's own list only. A shared Space's block would otherwise win
+      // the merge below, and any member of the Space can write it.
+      actingTools: globalBlocks.find((b) => b.blockName === ACTING_TOOLS_BLOCK)?.content ?? "",
       projectKey,
       revision
     }
@@ -612,7 +698,7 @@ function armWatchdog(budgetMs, exitCode = 0) {
   if (!Number.isFinite(budgetMs) || budgetMs <= 0) return () => {
   };
   let timer = setTimeout(() => {
-    process.exit(exitCode);
+    recordDiag({ event: "watchdog", outcome: "fail", reason: "timeout" }), process.exit(exitCode);
   }, budgetMs);
   return timer.unref?.(), () => clearTimeout(timer);
 }

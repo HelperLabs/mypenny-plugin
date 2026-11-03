@@ -3,7 +3,12 @@
 Codex plugin shell for Penny memory. It installs the Penny MCP server
 definition, Penny skill, and lifecycle hooks; hook behavior lives in
 `@mypenny/core`.
-Codex exposes the installed plugin directory through `CODEX_PLUGIN_ROOT`.
+Codex exposes the installed plugin directory to hooks through `PLUGIN_ROOT`
+(and `CLAUDE_PLUGIN_ROOT`, for compatibility). It does not set
+`CODEX_PLUGIN_ROOT`; hooks that used that name failed on every Codex install
+until 2026-10-06. The hooks that inject guidance raise Codex's per-hook
+`additionalContextLimit`, because the default (2,500 tokens, about 10 KB)
+sends a longer block to a file the model has to go read.
 
 The bundled MCP server URL is `https://app.mypenny.ai/mcp/codex`, a literal in
 `.mcp.json` with **no environment override** — `${VAR}` templating there breaks

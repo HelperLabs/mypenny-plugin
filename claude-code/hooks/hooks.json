@@ -1,4 +1,7 @@
 {
+  "modules": [
+    "./profile.ts"
+  ],
   "hooks": {
     "SessionStart": [
       {
@@ -6,7 +9,27 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session_start.mjs\" --host claude-code",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session_start.mjs\" --host claude-code --part 1",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session_start.mjs\" --host claude-code --part 2",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session_start.mjs\" --host claude-code --part 3",
             "timeout": 5
           }
         ]
@@ -18,7 +41,37 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/sync_memory.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/sync_memory.mjs\" --host claude-code --part 0",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/sync_memory.mjs\" --host claude-code --part 1",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/sync_memory.mjs\" --host claude-code --part 2",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/sync_memory.mjs\" --host claude-code --part 3",
             "timeout": 10
           }
         ]
@@ -30,7 +83,51 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pretool_sync.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pretool_sync.mjs\" --host claude-code --part 1",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pretool_sync.mjs\" --host claude-code --part 2",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pretool_sync.mjs\" --host claude-code --part 3",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*__penny_(write|edit)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/posture_record.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session_end.mjs\"",
             "timeout": 5
           }
         ]
@@ -45,6 +142,30 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/send_transcript.mjs\"",
             "timeout": 120,
             "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "mcp__.*__penny_(write|edit)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/permission_request.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Elicitation": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/elicitation_approve.mjs\"",
+            "timeout": 120
           }
         ]
       }

@@ -14,6 +14,16 @@ user's timezone so those dates are right.
 - **Update** with `penny_edit` (`entityType: "task"`, `taskId`): change status
   (open/in_progress/done/canceled — `"canceled"` is how you remove a task;
   tasks are never trashed), reschedule, or change any of the above.
+- **Edit several at once** with `penny_edit` (`entityType: "task"`,
+  `taskUpdates`) instead of one call per to-do: up to 100 items, each
+  `{taskId, ...}` with the fields a single edit takes, except `card`. Every
+  item is checked before anything saves, so one unknown `taskId` or stale
+  `expectedUpdatedAt` saves none; pass `expectedUpdatedAt` from your last read
+  when you have it. Past that check, items save one by one: the reply lists
+  `ok`, `failed` (each with a `code`) and any `pending` Space proposals. Retry
+  only the items in `failed`. Nothing undoes a batch in one step, so before
+  changing more than a handful of to-dos the user didn't name, say what will
+  change and get a yes.
 - **Read** with `penny_read` (`target: "tasks"`): filter by bucket (today/upcoming/anytime/
   someday), project, area, tags, status, or owner; pass `taskId` for one task's
   full detail. Use this for "what's on my plate?" or "what's due?".
