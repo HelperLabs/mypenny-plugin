@@ -201,6 +201,100 @@ function consumeDialogApproval(sessionId, now = Date.now()) {
   }
 }
 
+// plugins/mypenny-core/lib/confirm-approval.ts
+import * as fs3 from "node:fs";
+import * as path4 from "node:path";
+var CONFIRM_DESCRIPTION_TRASH = "confirm moves it to Trash now; keep leaves everything as it is", CONFIRM_DESCRIPTION_ALWAYS_ASK = "confirm does it now; keep leaves everything as it is";
+function isRecord2(value) {
+  return value !== null && typeof value == "object" && !Array.isArray(value);
+}
+function decisionChoices(decision) {
+  return Array.isArray(decision.oneOf) ? decision.oneOf.map((option) => isRecord2(option) ? option.const : void 0) : Array.isArray(decision.enum) ? decision.enum : null;
+}
+function itemsFieldOk(items) {
+  return items === void 0 ? !0 : isRecord2(items) && items.type === "array" && isRecord2(items.items) && Array.isArray(items.items.anyOf);
+}
+function confirmFormKind(input) {
+  if (!isRecord2(input) || input.hook_event_name !== "Elicitation" || input.mode !== "form" || typeof input.mcp_server_name != "string" || !PENNY_SERVERS.has(input.mcp_server_name) || typeof input.message != "string" || input.message.trim() === "") return null;
+  let schema = input.requested_schema;
+  if (!isRecord2(schema) || !isRecord2(schema.properties)) return null;
+  let keys = Object.keys(schema.properties).sort();
+  if (keys.join(",") !== "decision" && keys.join(",") !== "decision,items" || !itemsFieldOk(schema.properties.items)) return null;
+  let decision = schema.properties.decision;
+  if (!isRecord2(decision)) return null;
+  let listed = decisionChoices(decision);
+  if (!listed) return null;
+  let choices = [...listed].sort();
+  return choices.length !== 2 || choices[0] !== "confirm" || choices[1] !== "keep" ? null : decision.description === CONFIRM_DESCRIPTION_TRASH ? "trash" : decision.description === CONFIRM_DESCRIPTION_ALWAYS_ASK ? "always_ask" : null;
+}
+function confirmItemTitles(input) {
+  if (!isRecord2(input) || !isRecord2(input.requested_schema)) return [];
+  let properties = input.requested_schema.properties;
+  if (!isRecord2(properties) || !isRecord2(properties.items) || !isRecord2(properties.items.items)) return [];
+  let options = properties.items.items.anyOf;
+  return Array.isArray(options) ? options.flatMap((option) => isRecord2(option) && typeof option.title == "string" ? [option.title] : []) : [];
+}
+var PROMPT_ITEMS_SHOWN = 8;
+function confirmPromptMessage(input) {
+  let message = isRecord2(input) && typeof input.message == "string" ? input.message : "", titles = confirmItemTitles(input);
+  if (titles.length === 0) return message;
+  let shown = titles.slice(0, PROMPT_ITEMS_SHOWN).map((title) => `\u2022 ${title}`);
+  return titles.length > PROMPT_ITEMS_SHOWN && shown.push(`\u2026and ${titles.length - PROMPT_ITEMS_SHOWN} more`), `${message.replace(" Untick any you want to keep.", "")}
+
+${shown.join(`
+`)}`;
+}
+function confirmHookAnswer(choice) {
+  return choice === "confirm" ? {
+    hookSpecificOutput: {
+      hookEventName: "Elicitation",
+      action: "accept",
+      content: { decision: "confirm" }
+    }
+  } : choice === "keep" ? { hookSpecificOutput: { hookEventName: "Elicitation", action: "decline" } } : null;
+}
+function parseConfirmPromptResult(stdout) {
+  let out = stdout.trim();
+  return out === "confirm" || out === "keep" ? out : "no_answer";
+}
+var CONFIRM_PROMPT_GIVE_UP_SECONDS = 100, MAX_MESSAGE_CHARS2 = 1200, CONFIRM_PROMPT_SCRIPT = [
+  "on run argv",
+  "set msg to item 1 of argv",
+  "activate",
+  "try",
+  `set r to display dialog msg with title "Penny" buttons {"Keep", "Confirm"} cancel button "Keep" giving up after ${CONFIRM_PROMPT_GIVE_UP_SECONDS} with icon caution`,
+  "on error number -128",
+  'return "keep"',
+  "end try",
+  'if gave up of r then return "no_answer"',
+  'if button returned of r is "Confirm" then return "confirm"',
+  'return "keep"',
+  "end run"
+];
+function confirmPromptArgs(message) {
+  let text = message.length > MAX_MESSAGE_CHARS2 ? `${message.slice(0, MAX_MESSAGE_CHARS2 - 1)}\u2026` : message;
+  return text.startsWith("-") && (text = ` ${text}`), [...CONFIRM_PROMPT_SCRIPT.flatMap((line) => ["-e", line]), text];
+}
+var BYPASS_MODE = "bypassPermissions", MODE_NOTE_WINDOW_MS = 2 * 6e4;
+function modeNotePath(sessionId) {
+  return path4.join(sessionsDir(), `${sessionId}.confirm-mode.json`);
+}
+function sessionInBypass(input, now = Date.now()) {
+  if (!isRecord2(input)) return !1;
+  if (typeof input.permission_mode == "string") return input.permission_mode === BYPASS_MODE;
+  let sessionId = hookSessionId(input);
+  if (!sessionId) return !1;
+  try {
+    let note = JSON.parse(fs3.readFileSync(modeNotePath(sessionId), "utf-8"));
+    return !isRecord2(note) || typeof note.at != "number" || typeof note.mode != "string" || now - note.at > MODE_NOTE_WINDOW_MS || note.at > now ? !1 : note.mode === BYPASS_MODE;
+  } catch {
+    return !1;
+  }
+}
+function confirmWithoutPrompt(kind, input, now = Date.now()) {
+  return kind === "trash" && sessionInBypass(input, now);
+}
+
 // plugins/mypenny-core/scripts/elicitation_approve.ts
 function ask(message) {
   return new Promise((resolve) => {
@@ -212,9 +306,34 @@ function ask(message) {
     );
   });
 }
+function askConfirm(message) {
+  return new Promise((resolve) => {
+    execFile(
+      "osascript",
+      confirmPromptArgs(message),
+      { timeout: (CONFIRM_PROMPT_GIVE_UP_SECONDS + 10) * 1e3 },
+      (err, stdout) => resolve(err ? "no_answer" : parseConfirmPromptResult(String(stdout)))
+    );
+  });
+}
+async function answerConfirmation(input, kind) {
+  if (confirmWithoutPrompt(kind, input)) {
+    recordDiag({ event: "confirm_prompt", outcome: "ok", reason: "confirm_via_bypass" }), process.stdout.write(JSON.stringify(confirmHookAnswer("confirm")));
+    return;
+  }
+  if (process.platform !== "darwin" || process.env.MYPENNY_SPACE_PROMPT === "off") return;
+  let choice = await askConfirm(confirmPromptMessage(input));
+  recordDiag({ event: "confirm_prompt", outcome: choice === "no_answer" ? "skip" : "ok", reason: `${kind}:${choice}` });
+  let answer = confirmHookAnswer(choice);
+  answer && process.stdout.write(JSON.stringify(answer));
+}
 async function main() {
   setDiagContext({ hook: "elicitation" });
-  let input = await readHookInput();
+  let input = await readHookInput(), confirmKind = confirmFormKind(input);
+  if (confirmKind) {
+    await answerConfirmation(input, confirmKind);
+    return;
+  }
   if (!isSpaceShareForm(input)) return;
   let sessionId = hookSessionId(input);
   if (sessionId && consumeDialogApproval(sessionId)) {

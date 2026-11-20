@@ -111,6 +111,125 @@ function recordDiag(record) {
 // plugins/mypenny-core/lib/state.ts
 import * as fs2 from "node:fs";
 import * as crypto from "node:crypto";
+
+// plugins/mypenny-core/lib/format.ts
+function emptyGuidance(projectKey) {
+  return {
+    userFacts: "",
+    subconscious: "",
+    codingGuidance: "",
+    memoryPolicy: "",
+    persona: "",
+    preferences: "",
+    contract: "",
+    actingTools: "",
+    projectKey
+  };
+}
+var INJECTED_FIELDS = ["contract", "persona", "userFacts", "preferences", "subconscious", "codingGuidance", "memoryPolicy"];
+function blocks(guidance, cleared = []) {
+  let out = [], push = (tag, raw) => {
+    let text = (raw ?? "").trim();
+    text.length > 0 && out.push({ tag, text });
+  };
+  push("operating_contract", guidance.contract), push("persona", guidance.persona), push("user_facts", guidance.userFacts), push("preferences", guidance.preferences), push(`project_subconscious key="${guidance.projectKey}"`, guidance.subconscious), push("coding_guidance", guidance.codingGuidance), push("memory_policy", guidance.memoryPolicy);
+  for (let tag of cleared) {
+    let name = tag.split(" ")[0];
+    out.push({
+      tag: `${tag} cleared="true"`,
+      text: `This block is now empty. The ${name} given earlier in this session no longer applies; disregard it.`
+    });
+  }
+  return out;
+}
+function blockTags(guidance) {
+  return blocks(guidance).map((b) => b.tag);
+}
+function allBlockTags(projectKey) {
+  let full = { ...emptyGuidance(projectKey) };
+  for (let field of INJECTED_FIELDS) full[field] = "x";
+  return blockTags(full);
+}
+function clearedTags(previous, current) {
+  let now = new Set(blockTags(current));
+  return previous.filter((tag) => !now.has(tag));
+}
+function renderBlocks(guidance, cleared = []) {
+  let out = "";
+  for (let { tag, text } of blocks(guidance, cleared)) {
+    let close = tag.split(" ")[0];
+    out += `  <${tag}>
+    ${text}
+  </${close}>
+`;
+  }
+  return out;
+}
+function formatInjection(guidance, memories, cleared = []) {
+  let inner = renderBlocks(guidance, cleared), hasMem = memories.length > 0;
+  if (inner.length === 0 && !hasMem) return "";
+  let out = `<mypenny_subconscious>
+` + inner;
+  if (hasMem) {
+    out += `  <relevant_memories>
+`;
+    for (let m of memories) {
+      let score = m.score.toFixed(2), tags = m.tags.join(", "), content = m.content.length > 300 ? m.content.slice(0, 300) + "..." : m.content;
+      out += `    [${score}] ${content} (tags: ${tags})
+`;
+    }
+    out += `  </relevant_memories>
+`;
+  }
+  return out += "</mypenny_subconscious>", out;
+}
+function formatGuidanceUpdate(guidance, cleared = []) {
+  let inner = renderBlocks(guidance, cleared);
+  return inner.length === 0 ? "" : `<mypenny_subconscious_update>
+${inner}</mypenny_subconscious_update>`;
+}
+function changedGuidance(previous, current) {
+  if (!previous) return current;
+  let changed = emptyGuidance(current.projectKey);
+  for (let field of INJECTED_FIELDS)
+    (current[field] !== previous[field] || field === "subconscious" && current.projectKey !== previous.projectKey) && (changed[field] = current[field]);
+  return changed;
+}
+var PART_ONE_LIMIT = 8500;
+function formatGuidanceParts(guidance, kind, cleared = []) {
+  let outer = kind === "start" ? "mypenny_subconscious" : "mypenny_subconscious_update", body = ["", "", ""], limit = (kind === "start" ? [PART_ONE_LIMIT, 9500, 9500] : [9500, 9500, 9500]).map((n) => n - 100), size = kind === "start" ? (s) => s.length : (s) => JSON.stringify(s).length - 2, fit = (text, room) => kind === "start" ? Math.min(text.length, room) : escapedPrefix(text, room), used = [0, 0, 0], part = 0;
+  for (let { tag, text } of blocks(guidance, cleared)) {
+    let close = tag.split(" ")[0], rest = text, continued = !1;
+    for (; rest.length > 0; ) {
+      let open = continued ? `${tag} continued="true"` : tag, wrap = size(`  <${open}>
+    
+  </${close}>
+`), whole = size(rest) + wrap;
+      part < 2 && used[part] > 0 && used[part] + whole > limit[part] && (whole <= limit[part + 1] || limit[part] - used[part] - wrap < 1e3) && part++;
+      let room = part === 2 ? 1 / 0 : limit[part] - used[part] - wrap, cut = whole - wrap <= room ? rest.length : splitAt(rest, fit(rest, room)), piece = `  <${open}>
+    ${rest.slice(0, cut)}
+  </${close}>
+`;
+      rest = rest.slice(cut), body[part] += piece, used[part] += size(piece), continued = !0;
+    }
+  }
+  return body.map((inner, index) => inner ? `<${outer} part="${index + 1} of 3">
+${inner}</${outer}>` : "");
+}
+function escapedPrefix(text, max) {
+  let total = 0;
+  for (let i = 0; i < text.length; i++)
+    if (total += JSON.stringify(text[i]).length - 2, total > max) return i;
+  return text.length;
+}
+function splitAt(text, max) {
+  if (text.length <= max) return text.length;
+  let line = text.lastIndexOf(`
+`, max), sentence = text.lastIndexOf(". ", max), space = text.lastIndexOf(" ", max), boundary = [line, sentence >= 0 ? sentence + 1 : -1, space].find((i) => i >= max / 2);
+  return boundary === void 0 ? max : boundary + 1;
+}
+
+// plugins/mypenny-core/lib/state.ts
 var STALE_THRESHOLD_MS = 10080 * 60 * 1e3, OFF_RECORD_THRESHOLD_MS = 2160 * 60 * 60 * 1e3, CLEANUP_INTERVAL_MS = 1440 * 60 * 1e3;
 function ensureSessionsDir() {
   fs2.mkdirSync(sessionsDir(), { recursive: !0 });
@@ -142,6 +261,16 @@ function joinBundle(g) {
     g.contract
   ];
   return fields.every((f) => !f) ? "" : fields.join("\0");
+}
+function bundleHash(guidance) {
+  return hashContent(joinBundle(guidance));
+}
+function withInjectedGuidance(state, guidance) {
+  return { ...state, guidanceHash: bundleHash(guidance), injectedBlocks: blockTags(guidance) };
+}
+function clearedSinceInjection(state, guidance) {
+  let previous = state.injectedBlocks ?? (state.guidanceHash === null ? [] : allBlockTags(guidance.projectKey));
+  return clearedTags(previous, guidance);
 }
 
 // plugins/mypenny-core/lib/auth-store.ts
@@ -1100,7 +1229,7 @@ function classify(host, toolName, toolInput, permissionMode, eff, loadList) {
     if (verb === "penny_write" || verb === "penny_edit" || verb === "penny_delete") {
       if (nonEmpty(toolInput.workspaceId))
         return deny(
-          `Writing to a shared Space puts it in front of other members, and this run is ${postureWord(eff.posture)} by your settings for ${skill}. Save it to private memory (leave out workspaceId) instead.`
+          `Writing to a shared Group puts it in front of other members, and this run is ${postureWord(eff.posture)} by your settings for ${skill}. Save it to private memory (leave out workspaceId) instead.`
         );
       if (touchesActingToolsBlock(verb, toolInput))
         return deny(
@@ -1183,105 +1312,6 @@ function runPostureGate(input, host, cachedList) {
 function errorDetail(err) {
   let name = err instanceof Error ? err.name : typeof err, code = err?.code;
   return typeof code == "string" ? `${name}:${code}` : name;
-}
-
-// plugins/mypenny-core/lib/format.ts
-function emptyGuidance(projectKey) {
-  return {
-    userFacts: "",
-    subconscious: "",
-    codingGuidance: "",
-    memoryPolicy: "",
-    persona: "",
-    preferences: "",
-    contract: "",
-    actingTools: "",
-    projectKey
-  };
-}
-function blocks(guidance) {
-  let out = [], push = (tag, raw) => {
-    let text = raw.trim();
-    text.length > 0 && out.push({ tag, text });
-  };
-  return push("operating_contract", guidance.contract), push("persona", guidance.persona), push("user_facts", guidance.userFacts), push("preferences", guidance.preferences), guidance.subconscious.trim().length > 0 && out.push({
-    tag: `project_subconscious key="${guidance.projectKey}"`,
-    text: guidance.subconscious.trim()
-  }), push("coding_guidance", guidance.codingGuidance), push("memory_policy", guidance.memoryPolicy), out;
-}
-function renderBlocks(guidance) {
-  let out = "";
-  for (let { tag, text } of blocks(guidance)) {
-    let close = tag.split(" ")[0];
-    out += `  <${tag}>
-    ${text}
-  </${close}>
-`;
-  }
-  return out;
-}
-function formatInjection(guidance, memories) {
-  let inner = renderBlocks(guidance), hasMem = memories.length > 0;
-  if (inner.length === 0 && !hasMem) return "";
-  let out = `<mypenny_subconscious>
-` + inner;
-  if (hasMem) {
-    out += `  <relevant_memories>
-`;
-    for (let m of memories) {
-      let score = m.score.toFixed(2), tags = m.tags.join(", "), content = m.content.length > 300 ? m.content.slice(0, 300) + "..." : m.content;
-      out += `    [${score}] ${content} (tags: ${tags})
-`;
-    }
-    out += `  </relevant_memories>
-`;
-  }
-  return out += "</mypenny_subconscious>", out;
-}
-function formatGuidanceUpdate(guidance) {
-  let inner = renderBlocks(guidance);
-  return inner.length === 0 ? "" : `<mypenny_subconscious_update>
-${inner}</mypenny_subconscious_update>`;
-}
-function changedGuidance(previous, current) {
-  if (!previous) return current;
-  let changed = emptyGuidance(current.projectKey);
-  for (let field of ["contract", "persona", "userFacts", "preferences", "subconscious", "codingGuidance", "memoryPolicy"])
-    (current[field] !== previous[field] || field === "subconscious" && current.projectKey !== previous.projectKey) && (changed[field] = current[field] || "(removed)");
-  return changed;
-}
-var PART_ONE_LIMIT = 8500;
-function formatGuidanceParts(guidance, kind) {
-  let outer = kind === "start" ? "mypenny_subconscious" : "mypenny_subconscious_update", body = ["", "", ""], limit = (kind === "start" ? [PART_ONE_LIMIT, 9500, 9500] : [9500, 9500, 9500]).map((n) => n - 100), size = kind === "start" ? (s) => s.length : (s) => JSON.stringify(s).length - 2, fit = (text, room) => kind === "start" ? Math.min(text.length, room) : escapedPrefix(text, room), used = [0, 0, 0], part = 0;
-  for (let { tag, text } of blocks(guidance)) {
-    let close = tag.split(" ")[0], rest = text, continued = !1;
-    for (; rest.length > 0; ) {
-      let open = continued ? `${tag} continued="true"` : tag, wrap = size(`  <${open}>
-    
-  </${close}>
-`), whole = size(rest) + wrap;
-      part < 2 && used[part] > 0 && used[part] + whole > limit[part] && (whole <= limit[part + 1] || limit[part] - used[part] - wrap < 1e3) && part++;
-      let room = part === 2 ? 1 / 0 : limit[part] - used[part] - wrap, cut = whole - wrap <= room ? rest.length : splitAt(rest, fit(rest, room)), piece = `  <${open}>
-    ${rest.slice(0, cut)}
-  </${close}>
-`;
-      rest = rest.slice(cut), body[part] += piece, used[part] += size(piece), continued = !0;
-    }
-  }
-  return body.map((inner, index) => inner ? `<${outer} part="${index + 1} of 3">
-${inner}</${outer}>` : "");
-}
-function escapedPrefix(text, max) {
-  let total = 0;
-  for (let i = 0; i < text.length; i++)
-    if (total += JSON.stringify(text[i]).length - 2, total > max) return i;
-  return text.length;
-}
-function splitAt(text, max) {
-  if (text.length <= max) return text.length;
-  let line = text.lastIndexOf(`
-`, max), sentence = text.lastIndexOf(". ", max), space = text.lastIndexOf(" ", max), boundary = [line, sentence >= 0 ? sentence + 1 : -1, space].find((i) => i >= max / 2);
-  return boundary === void 0 ? max : boundary + 1;
 }
 
 // plugins/mypenny-core/lib/memory-client.ts
@@ -1388,63 +1418,120 @@ function spaceAskDecision() {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "ask",
-      permissionDecisionReason: "Penny: this shares the content below with a Space that other people can read. Allow shares it now."
+      permissionDecisionReason: "Penny: this shares the content below with a Group that other people can read. Allow shares it now."
     }
   };
 }
 
-// plugins/mypenny-core/lib/profile-file.ts
+// plugins/mypenny-core/lib/confirm-approval.ts
 import * as fs10 from "node:fs";
 import * as path9 from "node:path";
+
+// plugins/mypenny-core/lib/space-approval.ts
+var PROMPT_GIVE_UP_SECONDS = 100, PROMPT_SCRIPT = [
+  "on run argv",
+  "set msg to item 1 of argv",
+  "activate",
+  "try",
+  `set r to display dialog msg with title "Penny" buttons {"Reject", "Approve"} cancel button "Reject" giving up after ${PROMPT_GIVE_UP_SECONDS} with icon note`,
+  "on error number -128",
+  'return "reject"',
+  "end try",
+  'if gave up of r then return "no_answer"',
+  'if button returned of r is "Approve" then return "approve"',
+  'return "reject"',
+  "end run"
+];
+
+// plugins/mypenny-core/lib/confirm-approval.ts
+function isRecord(value) {
+  return value !== null && typeof value == "object" && !Array.isArray(value);
+}
+var CONFIRM_PROMPT_GIVE_UP_SECONDS = 100;
+var CONFIRM_PROMPT_SCRIPT = [
+  "on run argv",
+  "set msg to item 1 of argv",
+  "activate",
+  "try",
+  `set r to display dialog msg with title "Penny" buttons {"Keep", "Confirm"} cancel button "Keep" giving up after ${CONFIRM_PROMPT_GIVE_UP_SECONDS} with icon caution`,
+  "on error number -128",
+  'return "keep"',
+  "end try",
+  'if gave up of r then return "no_answer"',
+  'if button returned of r is "Confirm" then return "confirm"',
+  'return "keep"',
+  "end run"
+];
+var MODE_NOTE_WINDOW_MS = 2 * 6e4, CONFIRMABLE_VERBS = /* @__PURE__ */ new Set(["penny_delete", "penny_edit"]);
+function modeNotePath(sessionId) {
+  return path9.join(sessionsDir(), `${sessionId}.confirm-mode.json`);
+}
+function noteCallMode(payload, now = Date.now()) {
+  if (!isRecord(payload)) return !1;
+  let verb = pennyVerb(payload.tool_name);
+  if (!verb || !CONFIRMABLE_VERBS.has(verb)) return !1;
+  let sessionId = hookSessionId(payload);
+  if (!sessionId) return !1;
+  let mode = typeof payload.permission_mode == "string" ? payload.permission_mode : "";
+  try {
+    return fs10.mkdirSync(sessionsDir(), { recursive: !0, mode: 448 }), fs10.writeFileSync(modeNotePath(sessionId), JSON.stringify({ at: now, mode }), { mode: 384 }), !0;
+  } catch {
+    return !1;
+  }
+}
+
+// plugins/mypenny-core/lib/profile-file.ts
+import * as fs11 from "node:fs";
+import * as path10 from "node:path";
 import * as crypto6 from "node:crypto";
 function profilePath(sessionId) {
-  return path9.join(sessionsDir(), `${encodeURIComponent(sessionId)}.profile.txt`);
+  return path10.join(sessionsDir(), `${encodeURIComponent(sessionId)}.profile.txt`);
 }
 function markerPath(sessionId) {
-  return path9.join(sessionsDir(), `${encodeURIComponent(sessionId)}.mod`);
+  return path10.join(sessionsDir(), `${encodeURIComponent(sessionId)}.mod`);
 }
 function hasProfileMod(sessionId) {
-  return fs10.existsSync(markerPath(sessionId));
+  return fs11.existsSync(markerPath(sessionId));
 }
 function writeProfile(sessionId, text) {
-  fs10.mkdirSync(sessionsDir(), { recursive: !0 });
+  fs11.mkdirSync(sessionsDir(), { recursive: !0 });
   let target = profilePath(sessionId), temp = `${target}.${crypto6.randomUUID()}.tmp`;
   try {
-    fs10.writeFileSync(temp, text, { mode: 384 }), fs10.renameSync(temp, target);
+    fs11.writeFileSync(temp, text, { mode: 384 }), fs11.renameSync(temp, target);
   } finally {
     try {
-      fs10.unlinkSync(temp);
+      fs11.unlinkSync(temp);
     } catch {
     }
   }
 }
 function snapshotPath(sessionId, part) {
-  return path9.join(sessionsDir(), `${encodeURIComponent(sessionId)}.guidance-part-${part}.json`);
+  return path10.join(sessionsDir(), `${encodeURIComponent(sessionId)}.guidance-part-${part}.json`);
 }
 function readSnapshot(sessionId, part) {
   try {
-    return JSON.parse(fs10.readFileSync(snapshotPath(sessionId, part), "utf8"));
+    return JSON.parse(fs11.readFileSync(snapshotPath(sessionId, part), "utf8"));
   } catch {
     return null;
   }
 }
-function writeGuidanceSnapshot(sessionId, part, guidance) {
-  fs10.mkdirSync(sessionsDir(), { recursive: !0 });
+function replaceSnapshot(sessionId, part, guidance) {
+  fs11.mkdirSync(sessionsDir(), { recursive: !0 });
   let target = snapshotPath(sessionId, part), temp = `${target}.${crypto6.randomUUID()}.tmp`;
   try {
-    fs10.writeFileSync(temp, JSON.stringify(guidance), { mode: 384 }), fs10.renameSync(temp, target);
+    fs11.writeFileSync(temp, JSON.stringify(guidance), { mode: 384 }), fs11.renameSync(temp, target);
   } finally {
     try {
-      fs10.unlinkSync(temp);
+      fs11.unlinkSync(temp);
     } catch {
     }
   }
 }
 function changedFallbackPart(sessionId, part, guidance) {
-  let previous = readSnapshot(sessionId, part), changed = changedGuidance(previous, guidance), output = formatGuidanceParts(changed, "update")[part - 1];
+  let previous = readSnapshot(sessionId, part), changed = changedGuidance(previous, guidance), cleared = previous ? clearedTags(blockTags(previous), guidance) : [], output = formatGuidanceParts(changed, "update", cleared)[part - 1];
   if (!previous || JSON.stringify(previous) !== JSON.stringify(guidance)) {
     if (!claimWindow(`claude-guidance:${sessionId}:${part}:${hashContent(JSON.stringify(guidance))}`, 1e4)) return "";
-    writeGuidanceSnapshot(sessionId, part, guidance);
+    replaceSnapshot(sessionId, part, guidance);
   }
   return output;
 }
@@ -1472,7 +1559,7 @@ async function main() {
     host,
     () => cachedActingToolsForCwd(typeof raw?.cwd == "string" ? raw.cwd : process.cwd())
   ), space = host === "claude-code" ? recordSpaceWrite(raw) : "none";
-  switch (gate.kind) {
+  switch (host === "claude-code" && noteCallMode(raw), gate.kind) {
     case "decision":
       console.log(gate.stdout);
       return;
@@ -1507,7 +1594,7 @@ async function main() {
     disarm(), output2 && console.log(JSON.stringify({ additionalContext: output2 }));
     return;
   }
-  let joined = joinBundle(guidance), currentHash = joined ? hashContent(joined) : null;
+  let currentHash = bundleHash(guidance);
   if (currentHash === state.guidanceHash) {
     debug("guidance unchanged");
     return;
@@ -1518,16 +1605,13 @@ async function main() {
   }
   debug(`guidance changed (project=${guidance.projectKey}), injecting update`), disarm();
   let modActive = host === "claude-code" && hasProfileMod(hookInput.session_id);
-  if (modActive) {
-    let profile = formatInjection(guidance, []);
-    profile && writeProfile(hookInput.session_id, profile);
-  }
-  let output = modActive ? "" : formatGuidanceUpdate(guidance);
+  modActive && writeProfile(hookInput.session_id, formatInjection(guidance, []));
+  let output = modActive ? "" : formatGuidanceUpdate(guidance, clearedSinceInjection(state, guidance));
   output && console.log(
     JSON.stringify(
       host === "codex" ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: output } } : { additionalContext: output }
     )
-  ), writeState({ ...state, guidanceHash: currentHash });
+  ), writeState(withInjectedGuidance(state, guidance));
 }
 main().catch((err) => {
   DEBUG && console.error("[mypenny:pretool] error:", err), process.exit(parseHost(process.argv.slice(2)) === "cursor" ? 1 : 0);
