@@ -6,10 +6,13 @@ behavior lives in `@mypenny/core`. The pointer tells the AI to call
 `penny_session_start` and read the Penny skill from Penny, which serves that
 skill and keeps it current, so the plugin carries no copy of it.
 
-The bundled MCP server points at `https://app.mypenny.ai/mcp` — a literal
+The bundled MCP server points at `https://app.mypenny.ai/mcp/claude` — a literal
 URL, because surfaces like the Claude desktop app pass the config through
 without shell-style env expansion (a `${VAR:-default}` template reaches the
-connector dialog verbatim and fails URL validation). To point a dev install
+connector dialog verbatim and fails URL validation). That address asks for
+sign-in at the handshake, which is how the desktop app's connector dialog
+detects that Penny signs in with OAuth; the open `/mcp` gave it nothing to
+detect. To point a dev install
 at another engine, add a manual MCP server instead. On first use the host runs the
 server's OAuth flow — approve it via `/mcp` in an interactive session. This is
 separate from the hook auth below: the hooks and the MCP server authenticate
